@@ -1,0 +1,9 @@
+connections:
+  - name: <name>
+    endpoints:
+      - <endpoint_1>
+      - <endpoint_2>
+      - etc
+    port: <PORT>
+    acesskey: <ACCESS KEY>
+    secretkey: <SECRET KEY>
