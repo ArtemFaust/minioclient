@@ -40,5 +40,6 @@ func PrintHelpUsage() {
 	tbl.AddRow("REMOVE BUCKET OBJECTS BY TAG", "-ro -tags '{\"IsLatest\":false,\"IsDeleteMarker\":true}' -bn <bucket name> -d", "remove object if all tags equivalents")
 	tbl.AddRow("REMOVE BACCKET OBJECT BY ONE TAG NOT EQUIVALENTS", "-ro -not -tags '{\"IsLatest\":true,\"IsDeleteMarker\":false}' -bn <bucket name> -d -f", "remove object if one tags not equivalents")
 	tbl.AddRow("REMOVE BACCKET OBJECT ALL NOT LAST VERSIONS AND FIX LEAK", "-ro -bn <bucket name> -d -bylastmodify -fixleak -leakcount <count> -indexpool <index pool name>", "remove all not last versions objects and fix leacks object for rgw index")
+	tbl.AddRow("MIGRATE BUCKKET FROM SOURCE CLUSTER TO DST CLUSTER", "-e <source cluster from cfg> -ssl=[false|true] -migrate -destination <dst cluster from cfg> -bn <source bucket name> -dbn <dst bucket name> -d -maxentry <count threads>", "migrate bucket from source cluster to dst cluster")
 	tbl.Print()
 }

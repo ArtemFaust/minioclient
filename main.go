@@ -2,20 +2,16 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"io"
 	bucketoperations "minioclient/bucket_operations"
-	"minioclient/global"
 	"minioclient/helps"
 	objectoperations "minioclient/object_operations"
 	"minioclient/tui"
 	"minioclient/utils"
 	"os"
 
-	"github.com/ghodss/yaml"
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/sirupsen/logrus"
 )
 
@@ -29,6 +25,7 @@ var (
 	UseSSL            *bool
 	MakeBucket        *bool
 	BucketName        *string
+	DtsBucketName     *string
 	Region            *string
 	DeleteBucket      *bool
 	ListBuckets       *bool
@@ -59,6 +56,8 @@ var (
 	ListPeerObject    *int
 	ListDirs          *bool
 	Interactive       *bool
+	Migrate           *bool
+	Destination       *string
 )
 
 // Глобальная переменная клиента
@@ -96,7 +95,7 @@ func init() {
 	Not = flag.Bool("not", false, "operation logick switcher - for -ro -tags")
 	DryRun = flag.Bool("dryrun", false, "not apply changes")
 	Prefix = flag.String("prefix", "", "Prefix for bucket list object")
-	MaxEntrues = flag.Int("maxentry", 0, "Max list entry - default 1000")
+	MaxEntrues = flag.Int("maxentry", 1000, "Max list entry - default 1000")
 	ObjectLocking = flag.Bool("ol", false, "enable bucket object locking")
 	FixLeak = flag.Bool("fixleak", false, "fix leak object in bucket for remove obkject operation")
 	LeakCount = flag.Int("leakcount", 10, "threshold is triggered")
@@ -104,6 +103,9 @@ func init() {
 	ListPeerObject = flag.Int("tpo", 20, "max obkects on table for table printer")
 	ListDirs = flag.Bool("ls", false, "List bucket dirs and files")
 	Interactive = flag.Bool("i", false, "launche interactive tui")
+	Migrate = flag.Bool("migrate", false, "Migrate bucket objects from source endpoint to destination endpoint")
+	Destination = flag.String("destination", "", "Destination endpoint for migrate bucket objects")
+	DtsBucketName = flag.String("dbn", "", "Destination bucket name for migrate operation")
 	flag.Parse()
 
 	// Если дебаг отключен то вывод отбрасываем
@@ -122,77 +124,16 @@ func init() {
 		logrus.Fatal("Endpoint not provided!")
 	}
 
-	// Снача ищем данное подключение в конфигурации
-	// Считывание конфигурационного файла
-	cfg, e := readcfg()
-	// Если воникла ошибка чтения конфигурации тогда
-	// Передаваемый endpoint считаем не как имя в конфигурации - а как fqdn узла к которому подключемся
-	// СЛОЖНА БЛЯТЬ СЛОЖНА НИ ХУЯ НЕ ПОНЯТНО
+	// Создаем клиента для подключения к кластеру
+	var e error
+	Client, e = utils.InitClient(EndPoint, Port, AccessKeyID, SecretAccessKey, UseSSL)
 	if e != nil {
-		logrus.Warn("Error read cfg file: ", e)
-		// Если конфигурацию прочитать не удалось то подразумеваем
-		// что передан внешний endpoint и нуждны доп аргументы для подключения
-		if *Port == "" || *AccessKeyID == "" || *SecretAccessKey == "" {
-			logrus.Error("Please provide port access key id and secret key!")
-			os.Exit(1)
-		}
-		Client, e = makeClient()
-		if e != nil {
-			logrus.Error("Failed to create client!")
-			os.Exit(1)
-		}
-		// Если конфигурацию нашли и ее удалось прочитать
-	} else {
-		// Проверяем есть ли переданный endpoint в конфигурации
-		for i, connection := range cfg.Connections {
-			// Если находим параметры в конфигурации то используем их
-			if connection.Name == *EndPoint {
-				logrus.Info("Found configuration for endpoint: ", *EndPoint)
-				// Основные парамепптры подключения
-				Port = &cfg.Connections[i].Port
-				AccessKeyID = &cfg.Connections[i].Acesskey
-				SecretAccessKey = &cfg.Connections[i].Secretkey
-
-				// Выбор точки подключения для найденного endpoint
-				for y, endpoint := range cfg.Connections[i].Endpoints {
-					// Пробуем подключить к выбранному клиенту
-					EndPoint = &cfg.Connections[i].Endpoints[y]
-					logrus.Info("Selected endpoint: ", *EndPoint+":"+*Port)
-					Client, e = makeClient() // Пытаемся установить тестовое подключение
-					if e != nil {
-						logrus.Error("Error connect to endpoint: ", endpoint+":"+*Port, " Error: ", e)
-						if len(cfg.Connections[i].Endpoints)-1 == i {
-							logrus.Error("All selected endpoints not available!")
-							os.Exit(1)
-						}
-						continue
-					}
-					return
-				}
-			}
-		}
-		logrus.Warn("Not found configuration for endpoint: ", *EndPoint)
-		// Если в конфигурации не нашли нужного подключения то подразумеваем
-		// что передан внешний endpoint и нуждны доп аргументы для подключения
-		if *Port == "" || *AccessKeyID == "" || *SecretAccessKey == "" {
-			logrus.Error("Please provide port access key id and secret key!")
-			os.Exit(1)
-		}
-		Client, e = makeClient()
-		if e != nil {
-			logrus.Error("Failed to create client!")
-			os.Exit(1)
-		}
+		logrus.Error("Error init client!")
+		os.Exit(1)
 	}
 }
 
 func main() {
-	// Если не какие аргументы не переданны то запускаем TUI
-	if *Interactive {
-		tui.App(Client, *Interactive)
-		os.Exit(0)
-	}
-
 	// Параметры логера
 	logrus.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp:    true,
@@ -204,6 +145,22 @@ func main() {
 	// Если дебаг отключен то вывод отбрасываем
 	if !*Debug {
 		logrus.SetOutput(io.Discard)
+	}
+
+	// Если не какие аргументы не переданны то запускаем TUI
+	if *Interactive {
+		tui.App(Client, *Interactive)
+		os.Exit(0)
+	}
+
+	// Операция миграции бакета из кластера источника в кластер назначения
+	if *Migrate && *Destination != "" && *BucketName != "" {
+		e := objectoperations.MigrateObjects(Client, *BucketName, *Prefix, *Destination, UseSSL, *MaxEntrues, *DtsBucketName)
+		if e != nil {
+			logrus.Fatal("Error migrate operation!", e.Error())
+		}
+		logrus.Info("Succesfule done migrate operation")
+		return
 	}
 
 	// Создание нового bucket с проверкой что он уже не существует
@@ -329,64 +286,4 @@ func main() {
 		}
 		return
 	}
-}
-
-// Метод создания подключения к minio серверу
-func makeClient() (*minio.Client, error) {
-	minioClient, e := minio.New(*EndPoint+":"+*Port, &minio.Options{
-		Creds:           credentials.NewStaticV4(*AccessKeyID, *SecretAccessKey, ""),
-		Secure:          *UseSSL,
-		TrailingHeaders: true,
-		MaxRetries:      10,
-	})
-
-	if e != nil {
-		return nil, e
-	}
-	logrus.Info("client created")
-
-	b := utils.ConnectionHealthCheck(minioClient)
-	if !b {
-		logrus.Error("connection health check failed")
-		return nil, errors.New("connection health check failed")
-	}
-	logrus.Info("connection health check passed")
-	return minioClient, nil
-}
-
-// Метод чтения кофигурационного файла
-// Конфигурационный файл должен быть в формате YAML
-// Поиск файла осуществляется в следующем порядке:
-// 1. Поиск в ./config.yaml
-// 2. Поиск в ./config/config.yaml
-// 3. Поиск в ./.config/config.yaml
-// 4. Если удается определить домашнюю директорию пользователя то в HOMEDIR/.config/config.yaml
-func readcfg() (global.Cfg, error) {
-	var cfg global.Cfg
-	// Директории поиска конфгурационного файла
-	dirs := []string{"./", "./config/", "./.config/"}
-	h, e := os.UserHomeDir()
-	if e != nil {
-		dirs = append(dirs, h+"/.config/")
-	}
-
-	for _, dir := range dirs {
-		_, e = os.Stat(dir + "config.yaml")
-		if e != nil {
-			continue
-		}
-		b, e := os.ReadFile(dir + "config.yaml")
-		if e != nil {
-			continue
-		}
-
-		e = yaml.Unmarshal(b, &cfg)
-		if e != nil {
-			continue
-		}
-
-		return cfg, nil
-	}
-
-	return cfg, errors.New("configuration file not found")
 }
