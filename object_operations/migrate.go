@@ -47,10 +47,11 @@ func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string, 
 
 	objch := make(chan minio.ObjectInfo) // Создаем канал указанного размера для записи объектов продюсеру
 	sigch := make(chan bool, maxentry)   // Создаем управляющий канал контроля горутин
-	var wg sync.WaitGroup
+	var wg sync.WaitGroup                // Шруппа ожидания завершения всех горути н миграции объектов
+	var mu sync.Mutex                    // Мутикс для синхронизации доступа к репорту (добавление ошибок в массив ошибок)
 	// Иницируем продюсера
 	wg.Add(1)
-	go migrateProducer(objch, ctx, bucketname, fromclient, toclient, &wg, sigch, dstbucketname)
+	go migrateProducer(objch, ctx, bucketname, fromclient, toclient, &wg, sigch, dstbucketname, &mu)
 
 	// Проверяем существует ли бакет в клaстере назначения
 	// Если не существует то бакет нужно создать
@@ -119,7 +120,7 @@ func processInit(sourcelist <-chan minio.ObjectInfo, ctx context.Context,
 
 // Инициатор миграции объекта бакета
 func migrateProducer(objch chan minio.ObjectInfo, ctx context.Context, bucketname string,
-	fromclient *minio.Client, toclient *minio.Client, wg *sync.WaitGroup, sigch chan bool, dstbucketname string) {
+	fromclient *minio.Client, toclient *minio.Client, wg *sync.WaitGroup, sigch chan bool, dstbucketname string, mu *sync.Mutex) {
 	for obj := range objch {
 		select {
 		case <-ctx.Done():
@@ -127,7 +128,7 @@ func migrateProducer(objch chan minio.ObjectInfo, ctx context.Context, bucketnam
 		default:
 			sigch <- true // Занимаем слот управляющего канала
 			wg.Add(1)
-			go migrateObject(obj.Key, bucketname, fromclient, toclient, ctx, sigch, wg, dstbucketname)
+			go migrateObject(obj.Key, bucketname, fromclient, toclient, ctx, sigch, wg, dstbucketname, mu)
 		}
 	}
 	wg.Done()
@@ -135,7 +136,7 @@ func migrateProducer(objch chan minio.ObjectInfo, ctx context.Context, bucketnam
 
 // Обработчик миграции объекта бакета
 func migrateObject(key string, bucketname string, fromclient *minio.Client,
-	toclient *minio.Client, ctx context.Context, sigch chan bool, wg *sync.WaitGroup, dstbucketname string) {
+	toclient *minio.Client, ctx context.Context, sigch chan bool, wg *sync.WaitGroup, dstbucketname string, mu *sync.Mutex) {
 
 	finishreport.TotalObjects.Add(1) // Увеличиваем счетчик обработанных обектов
 	// Получаем объект из бакета источника
@@ -150,8 +151,10 @@ func migrateObject(key string, bucketname string, fromclient *minio.Client,
 		})
 		if e != nil {
 			logrus.Error(fmt.Sprintf("Error get source object! Key: %s Error: %s", key, e.Error()))
-			finishreport.ErrorObjects.Add(1)                     // Увеличиваем счетчик обработанных с ошибкой обектов
+			finishreport.ErrorObjects.Add(1) // Увеличиваем счетчик обработанных с ошибкой обектов
+			mu.Lock()
 			finishreport.Errors = append(finishreport.Errors, e) // Сохраняем ошибку
+			mu.Unlock()
 			return
 		}
 
@@ -162,8 +165,10 @@ func migrateObject(key string, bucketname string, fromclient *minio.Client,
 		stat, e := sourceobj.Stat()
 		if e != nil {
 			logrus.Error("Error getting object stats: ", e.Error())
-			finishreport.ErrorObjects.Add(1)                     // Увеличиваем счетчик обработанных с ошибкой обектов
+			finishreport.ErrorObjects.Add(1) // Увеличиваем счетчик обработанных с ошибкой обектов
+			mu.Lock()
 			finishreport.Errors = append(finishreport.Errors, e) // Сохраняем ошибку
+			mu.Unlock()
 			return
 		}
 
@@ -172,8 +177,10 @@ func migrateObject(key string, bucketname string, fromclient *minio.Client,
 			minio.PutObjectOptions{ContentType: "application/octet-stream"})
 		if e != nil {
 			logrus.Error(fmt.Sprintf("Error migrate object: %s Erros: %s", key, e.Error()))
-			finishreport.ErrorObjects.Add(1)                     // Увеличиваем счетчик обработанных с ошибкой обектов
+			finishreport.ErrorObjects.Add(1) // Увеличиваем счетчик обработанных с ошибкой обектов
+			mu.Lock()
 			finishreport.Errors = append(finishreport.Errors, e) // Сохраняем ошибку
+			mu.Unlock()
 			return
 		}
 		logrus.Info("Succesfule migrate object: ", key)
