@@ -155,7 +155,7 @@ func main() {
 
 	// Операция миграции бакета из кластера источника в кластер назначения
 	if *Migrate && *Destination != "" && *BucketName != "" {
-		e := objectoperations.MigrateObjects(Client, *BucketName, *Prefix, *Destination, UseSSL, *MaxEntrues, *DtsBucketName)
+		e := objectoperations.MigrateObjects(Client, *BucketName, *Prefix, *Destination, UseSSL, *MaxEntrues, *DtsBucketName, *Debug)
 		if e != nil {
 			logrus.Fatal("Error migrate operation!", e.Error())
 		}

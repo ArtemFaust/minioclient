@@ -11,7 +11,10 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 )
 
-require github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
+require (
+	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
+	github.com/eiannone/keyboard v0.0.0-20220611211555-0d226195f203 // indirect
+)
 
 require (
 	github.com/gdamore/encoding v1.0.0 // indirect

@@ -1,10 +1,6 @@
-# github.com/VividCortex/ewma v1.2.0
-## explicit; go 1.12
 # github.com/cheggaaa/pb v1.0.30
 ## explicit; go 1.12
 github.com/cheggaaa/pb
-# github.com/cheggaaa/pb/v3 v3.2.1
-## explicit; go 1.25.0
 # github.com/clipperhouse/uax29/v2 v2.2.0
 ## explicit; go 1.18
 github.com/clipperhouse/uax29/v2/graphemes
@@ -12,6 +8,9 @@ github.com/clipperhouse/uax29/v2/internal/iterators
 # github.com/dustin/go-humanize v1.0.1
 ## explicit; go 1.16
 github.com/dustin/go-humanize
+# github.com/eiannone/keyboard v0.0.0-20220611211555-0d226195f203
+## explicit; go 1.18
+github.com/eiannone/keyboard
 # github.com/epiclabs-io/winman v0.0.0-20220901164457-3d8c4b3ae090
 ## explicit; go 1.13
 github.com/epiclabs-io/winman

@@ -3,10 +3,13 @@ package objectoperations
 import (
 	"context"
 	"fmt"
+	"io"
 	"minioclient/utils"
+	"os"
 	"sync"
 	"sync/atomic"
 
+	"github.com/eiannone/keyboard"
 	"github.com/minio/minio-go/v7"
 	"github.com/sirupsen/logrus"
 )
@@ -22,12 +25,27 @@ type report struct {
 	Errors       []error
 }
 
+// Метод печати статистики исполнения миграции
+func (r *report) printStats() {
+	fmt.Printf(`
+Migration operation report:
+	Total processed objects count: %v
+	Migrated objects count: %v
+	Failed objects count: %v
+`, finishreport.TotalObjects.Load(), finishreport.DoneObjects.Load(), finishreport.ErrorObjects.Load())
+	fmt.Println("Errors list:")
+	for _, e := range finishreport.Errors {
+		fmt.Println(e.Error())
+	}
+}
+
 var finishreport report
 
 // fromclient - клиент кластера источника
 // bucketname - имя бакета источника
 // toname - название кластера назначения в конфигурации
-func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string, toendpoint string, usessl *bool, maxentry int, dstbucketname string) error {
+func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string,
+	toendpoint string, usessl *bool, maxentry int, dstbucketname string, debug bool) error {
 
 	// Если не указан бакет назначения то бакет назначения делаем равным исходному бакету
 	if dstbucketname == "" {
@@ -37,6 +55,9 @@ func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string, 
 	// Контекст выполнения операции миграции данных
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Запускаем поток отлеживание событий нажатия класиш
+	go readKeyboardEvents(ctx, debug, cancel)
 
 	// Создаем клиента для кластера назначения
 	toclient, e := utils.InitClient(&toendpoint, nil, nil, nil, usessl)
@@ -84,9 +105,9 @@ func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string, 
 	// Инициируем операцию миграции данных
 	processInit(sourcelist, ctx, toclient, bucketname, fromclient, objch)
 
-	close(objch)        // По окончанию обработки объектов из источника закрываем канал объектов для продюсера миграции
-	wg.Wait()           // Дожидаемся окончания всех горутин миграции
-	printResultReport() // Выводит результаты миграции
+	close(objch)              // По окончанию обработки объектов из источника закрываем канал объектов для продюсера миграции
+	wg.Wait()                 // Дожидаемся окончания всех горутин миграции
+	finishreport.printStats() // Выводит результаты миграции
 	return nil
 }
 
@@ -138,6 +159,7 @@ func migrateProducer(objch chan minio.ObjectInfo, ctx context.Context, bucketnam
 func migrateObject(key string, bucketname string, fromclient *minio.Client,
 	toclient *minio.Client, ctx context.Context, sigch chan bool, wg *sync.WaitGroup, dstbucketname string, mu *sync.Mutex) {
 
+	defer wg.Done()                  // ообщаем об окончании выполнении горутины
 	finishreport.TotalObjects.Add(1) // Увеличиваем счетчик обработанных обектов
 	// Получаем объект из бакета источника
 	select {
@@ -186,20 +208,46 @@ func migrateObject(key string, bucketname string, fromclient *minio.Client,
 		logrus.Info("Succesfule migrate object: ", key)
 		finishreport.DoneObjects.Add(1) // Увеличиваем счетчик успешно обработанных обектов
 	}
-	<-sigch   // Высвобождаем слот сигнального канала
-	wg.Done() // ообщаем об окончании выполнении горутины
+	<-sigch // Высвобождаем слот сигнального канала
 }
 
-// Метод печати отчета выполнения операции миграции объектов
-func printResultReport() {
-	fmt.Printf(`
-Migration operation report:
-	Total processed objects count: %v
-	Migrated objects count: %v
-	Failed objects count: %v
-`, finishreport.TotalObjects.Load(), finishreport.DoneObjects.Load(), finishreport.ErrorObjects.Load())
-	fmt.Println("Errors list:")
-	for _, e := range finishreport.Errors {
-		fmt.Println(e.Error())
+// Метод отслеивания управляющих сигналов
+func readKeyboardEvents(ctx context.Context, debug bool, cancel context.CancelFunc) {
+	// Открываем доступ к клавиатуре
+	if e := keyboard.Open(); e != nil {
+		logrus.Errorf("Error opening keyboard for read events: %s", e.Error())
+		return
+	}
+	// Обязательно закрываем при выходе
+	defer keyboard.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			_, key, e := keyboard.GetKey()
+			if e != nil {
+				logrus.Errorf("Error reading key from keyboard: %s", e.Error())
+				return
+			}
+			// Вывод статистики работы миграции
+			if key == keyboard.KeyCtrlS {
+				finishreport.printStats()
+			}
+			// Скрытие дебаг лога
+			if key == keyboard.KeyCtrlD {
+				debug = !debug
+			}
+			// Отмена опреации
+			if key == keyboard.KeyCtrlC {
+				cancel()
+			}
+		}
+		// Переключение вывода debug
+		if !debug {
+			logrus.SetOutput(io.Discard)
+		} else {
+			logrus.SetOutput(os.Stdout)
+		}
 	}
 }

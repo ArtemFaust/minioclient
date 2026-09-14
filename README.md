@@ -51,6 +51,7 @@ connections:
 - `-mb` – создать новый bucket
 - `-bn` – имя bucket
 - `-ol` – включить object locking
+- `-r, --region` – регион (по умолчанию us-east-1)
 
 **Удалить bucket:**
 ```bash
@@ -60,21 +61,22 @@ connections:
 
 **Список bucket'ов:**
 ```bash
-./minioclient -e <connection_name> -lb [-o table/json] [-prefix <prefix>] [-maxentry <count>]
+./minioclient -e <connection_name> -lb [-o table/json] [-prefix <prefix>] [-maxentry <count>] [-maxthreads <count>] [-endpoint <host>] [-port <port>]
 ```
 - `-lb` – список всех bucket'ов
 - `-o` – формат вывода (json/table, по умолчанию json)
 - `-prefix` – фильтр по префиксу
 - `-maxentry` – лимит на запись (по умолчанию 1000)
+- `-maxentry, --maxthreads` – количество потоков для операции миграции (по умолчанию 1000)
 
 **Проверить существование bucket:**
 ```bash
-./minioclient -e <connection_name> -bn <bucket_name>
+./minioclient -e <connection_name> -bn <bucket_name> [-o table/json]
 ```
 
 **Получить информацию о bucket:**
 ```bash
-./minioclient -e <connection_name> -bn <bucket_name>
+./minioclient -e <connection_name> -bn <bucket_name> [-o table/json]
 ```
 
 **Загрузить объект (файл или директорию):**
@@ -174,45 +176,45 @@ connections:
 
 | Флаг | Описание |
 |------|----------|
-| `-examples` | Показать примеры использования |
-| `-e, --endpoint` | Имя подключения из конфига или FQDN (обязательный атрибут) |
-| `-port` | API порт (используется из конфига если не задан явно) |
-| `-accesskey` | Access key ID |
-| `-secretkey` | Secret access key |
-| `-ssl` | Использовать HTTPS (по умолчанию true, задать -ssl=false для HTTP) |
+| `-examples, --examples` | Показать примеры использования |
+| `-e, --endpoint <name>` | Имя подключения из конфига или FQDN (обязательный атрибут) |
+| `-port <port>` | API порт (используется из конфига если не задан явно) |
+| `-accesskey <key>` | Access key ID |
+| `-secretkey <key>` | Secret access key |
+| `-ssl [true\|false]` | Использовать HTTPS (по умолчанию true, задать -ssl=false для HTTP) |
 | `-mb` | Создать новый bucket |
-| `-bn` | Название bucket |
-| `-r, --region` | Регион (по умолчанию us-east-1) |
+| `-bn <bucket_name>` | Название bucket |
+| `-r, --region <region>` | Регион (по умолчанию us-east-1) |
 | `-db` | Удалить существующий bucket (bucket должен быть пуст) |
 | `-lb` | Список всех bucket'ов |
-| `-lbo` | Список объектов в конкретном bucket |
-| `-liu` | Список незавершённых загрузок |
-| `-po` | Загрузить новый объект (файл или директорию) |
-| `-path` | Путь к файлу для загрузки |
-| `-ao` | Обновить существующий объект (append) |
-| `-ro` | Удалить объект по ключу, тегам или JSON файлу |
-| `-key` | Ключ объекта |
-| `-tags` | JSON условия удаления по тегам |
+| `-lbo <bucket_name>` | Список объектов в конкретном bucket |
+| `-ls` | Unix стиль списка бакета (директории и файлы) |
+| `-liu <bucket_name>` | Список незавершённых загрузок |
+| `-po -bn <buket> -path <file>` | Загрузить новый объект (файл или директорию) |
+| `-ao -bn <buket> -path <file>` | Обновить существующий объект (append) |
+| `-ro -bn <bucket> -key <obj>` | Удалить объект по ключу |
+| `-tags '<json>'` | JSON условия удаления по тегам |
 | `-not` | Инвертировать логику работы с тегами |
-| `-vid` | Version ID для целевого объекта (при операции удаления/получения) |
+| `-dryrun` | Не применять изменения (dry-run) |
+| `-path <file>` | Путь к файлу для загрузки (массовое удаление) |
+| `-vid <version_id>` | Version ID для целевого объекта (при операции удаления/получения) |
 | `-bylastmodify` | Удаление объектов кроме последнего по last-modify времени |
 | `-sv` | Показывать версии файлов в списке |
-| `-ls` | Unix стиль списка бакета (директории и файлы) |
-| `-prefix` | Фильтр по префиксу при работе с объектами |
-| `-maxentry` | Максимальное кол-во записей при списке (по умолчанию 1000) |
+| `-prefix <prefix>` | Фильтр по префиксу при работе с объектами |
+| `-maxentry <count>` | Максимальное кол-во записей при списке (по умолчанию 1000) |
 | `-f, --force` | Force режим операций |
-| `-dryrun` | Не применять изменения (dry-run) |
-| `-o, --output` | Формат вывода: json или table (по умолчанию json) |
+| `-o, --output[=json\|table]` | Формат вывода: json или table (по умолчанию json) |
 | `-d, --debug` | Включить вывод debug сообщений |
 | `-i, --interactive` | Запустить TUI интерфейс |
 | `-ol` | Enable object locking для bucket |
 | `-fixleak` | Исправить утечки в RGW индексе (для -ro) |
-| `-leakcount` | Порог срабатывания для fixleak (по умолчанию 10) |
-| `-indexpool` | Имя index pool дляRGW (по умолчанию default.rgw.buckets.index) |
-| `-tpo` | Макс объектов на таблице для табличного принтера (по умолчанию 20) |
-| `-dbn` | Имя бакета назначения при миграции объектов бакета. Если не указанно то имя бакета назначения будет равно имени бакета источника. |
+| `-leakcount <count>` | Порог срабатывания для fixleak (по умолчанию 10) |
+| `-indexpool <pool>` | Имя index pool для RGW (по умолчанию default.rgw.buckets.index) |
+| `-tpo <count>` | Макс объектов на таблице для табличного принтера (по умолчанию 20) |
+| `-dbn <destination_bucket>` | Имя бакета назначения при миграции объектов. Если не указано то имя бакета назначения будет равно имени бакета источника. |
 | `-migrate` | Инициализация операции миграции объектов бакета |
-| `-destination` | Название кластера куда будет выполнятся миграция объектов бакета |
+| `-destination <cluster_from_cfg>` | Название кластера куда будет выполнятся миграция объектов бакета |
+| `-maxthreads, --maxentry <count>` | Количество потоков для операции миграции (по умолчанию 1000) |
 
 ## Примеры конфигурации
 
@@ -262,6 +264,11 @@ connections:
 ./minioclient -e localdev -po -bn mybackup -path ./docs -f
 ```
 
+### Просмотр объектов в Unix стиле:
+```bash
+./minioclient -e localdev -lbo -bn mybackup -o table -ls -sv
+```
+
 ### Массовое удаление неактуальных версий с исправлением утечек:
 ```bash
 ./minioclient -e cephrgw -ro -bn archives -bylastmodify -fixleak -leakcount 10 -d
@@ -271,16 +278,46 @@ connections:
 ```bash
 ./minioclient -e <source cluster from cfg> -ssl=false -migrate -destination <dst cluster from cfg> -bn <source bucket> [-dbn <dst bucket>] [-d] [-maxentry <threads count>]
 ```
-Данная операция позволяет произвести миграцию объектов бакета в другой кластер или в тот же клстер но в другой бакет.
-Если не указан destination bucket - значит будет создан бакет с названием source bucket
-Каждый объект бакета обрабатывается в отдельном потоке исполнения операции миграции. Ключем maxentry можно указать сколько таких потов будет
-выполнятся одновременно (сколько объектов бакета будет мигрировать одновременно). По умолчанию 1000
+Данная операция позволяет произвести миграцию объектов бакета в другой кластер или в тот же клстер но в другой бакет. Если не указан destination bucket - значит будет создан бакет с названием source bucket Каждый объект бакета обрабатывается в отдельном потоке исполнения операции миграции. Ключем maxentry можно указать сколько таких потов будет выполнятся одновременно (сколько объектов бакета будет мигрировать одновременно). По умолчанию 1000
 
+Дополнительные комбинации клавиш
+- Ctrl+D - переключть режим логирования (включить или выключить подробный лог)
+- Ctrl+S - печать статистики работы миграции
+- Ctrl+C - завершить миграцию (прерывание контекста выполнения)
 
+### Массовое удаление объектов из JSON файла:
+```bash
+# Шаг 1: Получить все объекты с версиями
+./minioclient -e <connection_name> -bn <bucket_name> -lbo -sv -o json > all_objects.json
+
+# Шаг 2: Подготовить массив для удаления (все версии кроме latest)
+cat all_objects.json | jq '[.[] | select(.IsLatest == false)]' > removable.json
+
+# Шаг 3: Инициализировать удаление
+./minioclient -e <connection_name> -ro -bn <bucket_name> -f -path ./removable.json
+```
+
+### Массовое удаление по тегам:
+```bash
+# Удалить все, кроме последней версии со всеми delete markers (для Ceph RGW)
+./minioclient -e cephrgw -ro -tags '{"IsLatest":false,"IsDeleteMarker":true}' -bn archives -d -f
+
+# Или удалить используя логику NOT (удалять если условие НЕ совпадает)
+./minioclient -e cephrgw -ro -not -tags '{"IsLatest":true}' -bn archives -d -f
+
+# Удалить объекты со специфическими тегами
+./minioclient -e localdev -ro -tags '{"env":"test","cleanup":"yes"}' -bn testdata -d -f
+```
 
 ### Работа через TUI:
 ```bash
 ./minioclient -i -e localdev
+```
+
+### Получение метаданных объекта:
+```bash
+./minioclient -e localdev -gos -bn mybucket -key myobject.txt
+./minioclient -e localdev -go -bn mybucket -key myobject.txt
 ```
 
 ## TUI Интерфейс
@@ -292,6 +329,29 @@ connections:
 - Работать с несколькими подключениями
 
 Пуск: `./minioclient -i -e <connection_name>`
+
+## Примеры использования различных флагов
+
+### Список bucket'ов в разных форматах:
+```bash
+# JSON вывод (по умолчанию)
+minioclient -lb -o json
+
+# Табличный вывод
+minioclient -lb -o table
+
+# Таблица с фильтрацией по префиксу и лимитом
+minioclient -lb -o table -prefix docs -maxentry 50
+```
+
+### Комбинации операций:
+```bash
+# Получить метаданные файла в JSON формате
+minioclient -e localdev -gos -bn mybucket -key myfile.txt -vid version123
+
+# Удаление с forced режимом и dry-run
+minioclient -e localdev -ro -bn mybucket -key old.txt -dryrun -f
+```
 
 ## Лицензия
 
