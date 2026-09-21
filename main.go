@@ -149,13 +149,17 @@ func main() {
 
 	// Если не какие аргументы не переданны то запускаем TUI
 	if *Interactive {
-		tui.App(Client, *Interactive)
+		tui.App(Client, *Interactive, UseSSL)
 		os.Exit(0)
 	}
 
 	// Операция миграции бакета из кластера источника в кластер назначения
 	if *Migrate && *Destination != "" && *BucketName != "" {
-		e := objectoperations.MigrateObjects(Client, *BucketName, *Prefix, *Destination, UseSSL, *MaxEntrues, *DtsBucketName, *Debug)
+		// Контекст выполнения операции миграции данных
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		e := objectoperations.MigrateObjects(Client, *BucketName, *Prefix, *Destination, UseSSL,
+			*MaxEntrues, *DtsBucketName, *Debug, *Interactive, ctx, cancel, nil)
 		if e != nil {
 			logrus.Fatal("Error migrate operation!", e.Error())
 		}

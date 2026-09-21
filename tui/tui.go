@@ -9,7 +9,7 @@ import (
 	"github.com/rivo/tview"
 )
 
-func App(minioClient *minio.Client, interactive bool) {
+func App(minioClient *minio.Client, interactive bool, usessl *bool) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -21,7 +21,7 @@ func App(minioClient *minio.Client, interactive bool) {
 	wm.Blur()
 
 	footer, logger := makeFoooter(wm, app, minioClient, ctx)
-	makeBucketListWindow(wm, minioClient, app, footer, logger, interactive)
+	makeBucketListWindow(wm, minioClient, app, footer, logger, interactive, usessl)
 
 	if err := app.SetRoot(wm, true).EnableMouse(true).Run(); err != nil {
 		panic(err)

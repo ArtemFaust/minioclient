@@ -15,7 +15,7 @@ import (
 func InitClient(endpoint *string, port *string, accessKeyID *string, secretAccessKey *string, useSSL *bool) (*minio.Client, error) {
 	// Снача ищем данное подключение в конфигурации
 	// Считывание конфигурационного файла
-	cfg, e := readcfg()
+	cfg, e := Readcfg()
 	// Если воникла ошибка чтения конфигурации тогда
 	// Передаваемый endpoint считаем не как имя в конфигурации - а как fqdn узла к которому подключемся
 	// СЛОЖНА БЛЯТЬ СЛОЖНА НИ ХУЯ НЕ ПОНЯТНО
@@ -111,7 +111,7 @@ func makeClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 // 2. Поиск в ./config/config.yaml
 // 3. Поиск в ./.config/config.yaml
 // 4. Если удается определить домашнюю директорию пользователя то в HOMEDIR/.config/config.yaml
-func readcfg() (global.Cfg, error) {
+func Readcfg() (global.Cfg, error) {
 	var cfg global.Cfg
 	// Директории поиска конфгурационного файла
 	dirs := []string{"./", "./config/", "./.config/"}

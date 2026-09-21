@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	bucketoperations "minioclient/bucket_operations"
+	objectoperations "minioclient/object_operations"
 	filedialog "minioclient/tui/customwidgets/filedialog"
+	"minioclient/utils"
 	"os"
 	"strconv"
 	"time"
@@ -27,7 +30,7 @@ var GET_BUCKETS_WORK_STATUS bool
 
 // Метод создания окна BUCKET LIST
 func makeBucketListWindow(wm *winman.Manager, minioClient *minio.Client, app *tview.Application,
-	footer *winman.WindowBase, logger chan string, interactive bool) {
+	footer *winman.WindowBase, logger chan string, interactive bool, usessl *bool) {
 	bucketlist := wm.NewWindow()  // Создание нового окна
 	bucketlist.SetDraggable(true) // Делаем окно перемечаемым
 	bucketlist.SetResizable(true) // Делаем окно маштабируемым
@@ -100,6 +103,10 @@ func makeBucketListWindow(wm *winman.Manager, minioClient *minio.Client, app *tv
 					}
 					modal.Hide()
 				}).SetShortcutColor(tcell.NewRGBColor(0, 0, 0)).
+				AddItem("Мигрировать", "", '🔄', func() {
+					initMigrateBucketOperation(wm, app, bucket_name, logger, minioClient, usessl)
+					modal.Hide()
+				}).
 				AddItem("Закрыть меню", "", '❌', func() { modal.Hide() }).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
 			modal.SetRect(x+10, y, 20, 10)
 			modal.SetModal(true)
@@ -485,6 +492,92 @@ func fileselectB(wm *winman.Manager, app *tview.Application, logger chan string,
 	})
 
 	m.SetRoot(fd)
+	m.Show()
+	app.SetFocus(m)
+}
+
+// Метод инициализации миграции бакета
+func initMigrateBucketOperation(wm *winman.Manager, app *tview.Application,
+	sourcebucketname string, logger chan string, fomclient *minio.Client, usessl *bool) {
+
+	var toendpoint string
+	var dstbucketname string
+	maxentry := 1000
+
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetBorder(true)
+	m.SetRect(w/3, h/4, 50, 11)
+
+	form := tview.NewForm().
+		AddInputField("Название бакета:", sourcebucketname, 20, nil, func(text string) {
+			dstbucketname = text
+		}).
+		AddDropDown("Кластер назначения:", func() []string {
+			// Формируем список доступных подключений из конфигураионного файла
+			var items []string
+			cfg, e := utils.Readcfg()
+			if e != nil {
+				logger <- "Error read cfg file: " + e.Error()
+				return items
+			}
+			for _, connection := range cfg.Connections {
+				items = append(items, connection.Name)
+			}
+			return items
+		}(), 0, func(option string, optionIndex int) {
+			toendpoint = option
+		}).
+		AddInputField("Кол-во одновременных миграций:", strconv.Itoa(maxentry), 20, nil, func(text string) {
+			if th, e := strconv.Atoi(text); e == nil {
+				maxentry = th
+			}
+		}).
+		AddButton("Мигрировать", func() {
+			// Выполняем миграцию объектов в отдельном потоке
+			go func() {
+				// Прогресс выполнения операции
+				pm, ch := progress(wm, app, "Миграция бакета: "+sourcebucketname)
+
+				// Контекст выполнения операции миграции данных
+				ctx, cancel := context.WithCancel(context.Background())
+				defer func() {
+					close(ch) // закрываем канал
+					cancel()  // отменяем контекст выполнения
+				}()
+
+				pm.AddButton(&winman.Button{
+					Symbol: '❌',
+					OnClick: func() {
+						cancel() // отменяем контекст выполнения
+						wm.RemoveWindow(pm)
+					},
+				})
+
+				logger <- "Начало миграции бакета: " + sourcebucketname
+				e := objectoperations.MigrateObjects(fomclient, sourcebucketname, "",
+					toendpoint, usessl, maxentry, dstbucketname, false, true, ctx, cancel, ch)
+				if e != nil {
+					logger <- fmt.Sprintf("Error execute migration bucket %s objects: %s", sourcebucketname, e.Error())
+					pm.SetBorderColor(tcell.ColorRed) // По окончанию выполнения поля делаем red
+					return
+				}
+				logger <- fmt.Sprintf("Миграция бакета %s выполненна успешна.", sourcebucketname)
+				pm.SetBorderColor(tcell.ColorGreen) // По окончанию выполнения поля делаем зелеными
+			}()
+			wm.RemoveWindow(m)
+		}).
+		AddButton("Отмена", func() {
+			wm.RemoveWindow(m)
+		})
+
+	m.SetRoot(form)
+	m.SetTitle("Миграция бакета")
+	m.AddButton(&winman.Button{
+		Symbol:  '❔',
+		OnClick: func() { wm.RemoveWindow(m) },
+	})
 	m.Show()
 	app.SetFocus(m)
 }

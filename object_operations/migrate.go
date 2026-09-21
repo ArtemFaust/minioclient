@@ -6,6 +6,7 @@ import (
 	"io"
 	"minioclient/utils"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -45,16 +46,13 @@ var finishreport report
 // bucketname - имя бакета источника
 // toname - название кластера назначения в конфигурации
 func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string,
-	toendpoint string, usessl *bool, maxentry int, dstbucketname string, debug bool) error {
+	toendpoint string, usessl *bool, maxentry int, dstbucketname string, debug bool,
+	interactive bool, ctx context.Context, cancel context.CancelFunc, eventch chan string) error {
 
 	// Если не указан бакет назначения то бакет назначения делаем равным исходному бакету
 	if dstbucketname == "" {
 		dstbucketname = bucketname
 	}
-
-	// Контекст выполнения операции миграции данных
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// Запускаем поток отлеживание событий нажатия класиш
 	go readKeyboardEvents(ctx, debug, cancel)
@@ -72,7 +70,7 @@ func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string,
 	var mu sync.Mutex                    // Мутикс для синхронизации доступа к репорту (добавление ошибок в массив ошибок)
 	// Иницируем продюсера
 	wg.Add(1)
-	go migrateProducer(objch, ctx, bucketname, fromclient, toclient, &wg, sigch, dstbucketname, &mu)
+	go migrateProducer(objch, ctx, bucketname, fromclient, toclient, &wg, sigch, dstbucketname, &mu, eventch)
 
 	// Проверяем существует ли бакет в клaстере назначения
 	// Если не существует то бакет нужно создать
@@ -105,9 +103,12 @@ func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string,
 	// Инициируем операцию миграции данных
 	processInit(sourcelist, ctx, toclient, bucketname, fromclient, objch)
 
-	close(objch)              // По окончанию обработки объектов из источника закрываем канал объектов для продюсера миграции
-	wg.Wait()                 // Дожидаемся окончания всех горутин миграции
-	finishreport.printStats() // Выводит результаты миграции
+	close(objch) // По окончанию обработки объектов из источника закрываем канал объектов для продюсера миграции
+	wg.Wait()    // Дожидаемся окончания всех горутин миграции
+	if !interactive {
+		finishreport.printStats() // Выводит результаты миграции
+	}
+
 	return nil
 }
 
@@ -141,7 +142,8 @@ func processInit(sourcelist <-chan minio.ObjectInfo, ctx context.Context,
 
 // Инициатор миграции объекта бакета
 func migrateProducer(objch chan minio.ObjectInfo, ctx context.Context, bucketname string,
-	fromclient *minio.Client, toclient *minio.Client, wg *sync.WaitGroup, sigch chan bool, dstbucketname string, mu *sync.Mutex) {
+	fromclient *minio.Client, toclient *minio.Client,
+	wg *sync.WaitGroup, sigch chan bool, dstbucketname string, mu *sync.Mutex, eventch chan string) {
 	for obj := range objch {
 		select {
 		case <-ctx.Done():
@@ -149,7 +151,7 @@ func migrateProducer(objch chan minio.ObjectInfo, ctx context.Context, bucketnam
 		default:
 			sigch <- true // Занимаем слот управляющего канала
 			wg.Add(1)
-			go migrateObject(obj.Key, bucketname, fromclient, toclient, ctx, sigch, wg, dstbucketname, mu)
+			go migrateObject(obj.Key, bucketname, fromclient, toclient, ctx, sigch, wg, dstbucketname, mu, eventch)
 		}
 	}
 	wg.Done()
@@ -157,7 +159,8 @@ func migrateProducer(objch chan minio.ObjectInfo, ctx context.Context, bucketnam
 
 // Обработчик миграции объекта бакета
 func migrateObject(key string, bucketname string, fromclient *minio.Client,
-	toclient *minio.Client, ctx context.Context, sigch chan bool, wg *sync.WaitGroup, dstbucketname string, mu *sync.Mutex) {
+	toclient *minio.Client, ctx context.Context, sigch chan bool,
+	wg *sync.WaitGroup, dstbucketname string, mu *sync.Mutex, eventch chan string) {
 
 	defer wg.Done()                  // ообщаем об окончании выполнении горутины
 	finishreport.TotalObjects.Add(1) // Увеличиваем счетчик обработанных обектов
@@ -206,6 +209,15 @@ func migrateObject(key string, bucketname string, fromclient *minio.Client,
 			return
 		}
 		logrus.Info("Succesfule migrate object: ", key)
+		// Если передан канал отправки уведомлений
+		// записываем в него ключ объекта
+		if eventch != nil {
+			if len(strings.Split(key, "/")) != 0 {
+				eventch <- "Succesfule migrate object: " + strings.Split(key, "/")[len(strings.Split(key, "/"))-1]
+			} else {
+				eventch <- key
+			}
+		}
 		finishreport.DoneObjects.Add(1) // Увеличиваем счетчик успешно обработанных обектов
 	}
 	<-sigch // Высвобождаем слот сигнального канала
