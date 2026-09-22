@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"minioclient/global"
 
 	"github.com/fatih/color"
 	"github.com/minio/minio-go/v7"
@@ -14,9 +15,9 @@ import (
 // Метод просмотра текучих задач по загрузке
 // возвращает массив объектов которые
 // еще не загрузись на сервер и находятся в статусе загрузки
-func ListIncompleteUploads(minioClient *minio.Client, BucketName *string, o *string) {
+func ListIncompleteUploads(client *global.GlobalClient, BucketName *string, o *string) {
 	isRecursive := true // Recursively list
-	multiPartObjectCh := minioClient.ListIncompleteUploads(context.Background(), *BucketName, "/", isRecursive)
+	multiPartObjectCh := client.MinioClient.ListIncompleteUploads(context.Background(), *BucketName, "/", isRecursive)
 	if *o == "table" {
 		ltablePrint(multiPartObjectCh)
 	}

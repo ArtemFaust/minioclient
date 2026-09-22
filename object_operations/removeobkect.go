@@ -25,7 +25,7 @@ import (
 // Метод удаления объекта
 // если объекта не существует то не вовращет ошибку
 // функция завершается успешно
-func RemoveObject(minioClient *minio.Client, Key *string, BucketName *string, force *bool, vid *string, dryrun bool) error {
+func RemoveObject(client *global.GlobalClient, Key *string, BucketName *string, force *bool, vid *string, dryrun bool) error {
 	opts := minio.RemoveObjectOptions{
 		GovernanceBypass: true,
 		ForceDelete:      *force,
@@ -33,7 +33,7 @@ func RemoveObject(minioClient *minio.Client, Key *string, BucketName *string, fo
 	}
 	// Операция удаления выполняется только если dryrun == false
 	if !dryrun {
-		e := minioClient.RemoveObject(context.Background(), *BucketName, *Key, opts)
+		e := client.MinioClient.RemoveObject(context.Background(), *BucketName, *Key, opts)
 		if e != nil {
 			logrus.Error(e)
 			return e
@@ -44,7 +44,7 @@ func RemoveObject(minioClient *minio.Client, Key *string, BucketName *string, fo
 }
 
 // Метод массового удаление объектов из бакета через json фаил
-func RemoveBucketObjects(minioClient *minio.Client, BucketName *string, force *bool, inputjson string, dryrun bool) error {
+func RemoveBucketObjects(client *global.GlobalClient, BucketName *string, force *bool, inputjson string, dryrun bool) error {
 	// Проверяем сучествования файла json
 	_, e := os.Stat(inputjson)
 	if e != nil {
@@ -83,7 +83,7 @@ func RemoveBucketObjects(minioClient *minio.Client, BucketName *string, force *b
 	rch := make(chan minio.ObjectInfo) // Канал передачи оюъектов в метод удаления
 	var rwg sync.WaitGroup             // Группа синхронизации для метода удаления ccmultiple
 	rwg.Add(1)
-	go ccmultiple(minioClient, BucketName, rch, &rwg) // Запуск горутины удаления объектов
+	go ccmultiple(client, BucketName, rch, &rwg) // Запуск горутины удаления объектов
 	for _, object := range s3Objects {
 		logrus.Info("Add object to remove: ", object.Key, " VersionID: ", object.VersionID)
 		if !dryrun {
@@ -96,9 +96,10 @@ func RemoveBucketObjects(minioClient *minio.Client, BucketName *string, force *b
 }
 
 // Метод инициализации удаления обхектов из бакета
-func c(objects *[]global.BucketObject, lock chan bool, wg *sync.WaitGroup, minioClient *minio.Client, BucketName *string, force *bool, dryrun bool) {
+func c(objects *[]global.BucketObject, lock chan bool, wg *sync.WaitGroup,
+	client *global.GlobalClient, BucketName *string, force *bool, dryrun bool) {
 	for _, object := range *objects {
-		if e := RemoveObject(minioClient, &object.Name, BucketName, force, &object.VersionID, dryrun); e != nil {
+		if e := RemoveObject(client, &object.Name, BucketName, force, &object.VersionID, dryrun); e != nil {
 			logrus.Errorf("Failed to remove object %s: %v", object.Name, e)
 		}
 	}
@@ -107,7 +108,7 @@ func c(objects *[]global.BucketObject, lock chan bool, wg *sync.WaitGroup, minio
 }
 
 // Метод удаления объектов по ссответствию тегу объекта
-func RemoveBucketObjectByTags(minioClient *minio.Client, BucketName *string, force *bool, tag string,
+func RemoveBucketObjectByTags(client *global.GlobalClient, BucketName *string, force *bool, tag string,
 	not bool, dryrun bool, fixleak bool, leakcount int, indexpool string, interactive bool) error {
 	// Получаем теги объекта по соотвествиям которым будем проводить удаление
 	var o any
@@ -120,7 +121,7 @@ func RemoveBucketObjectByTags(minioClient *minio.Client, BucketName *string, for
 	defer cancel()
 
 	// Проверяем что bucket существует
-	f, e := bucketoperations.CheckBucketExist(minioClient, BucketName)
+	f, e := bucketoperations.CheckBucketExist(client, BucketName)
 	if e != nil {
 		logrus.Error(e)
 		return e
@@ -133,7 +134,7 @@ func RemoveBucketObjectByTags(minioClient *minio.Client, BucketName *string, for
 	}
 	// Получаем все объекты из bucket
 	logrus.Info("Get bucket objects list...")
-	objectCh := minioClient.ListObjects(ctx, *BucketName, minio.ListObjectsOptions{
+	objectCh := client.MinioClient.ListObjects(ctx, *BucketName, minio.ListObjectsOptions{
 		Prefix:       "",
 		Recursive:    true,
 		WithVersions: true,
@@ -155,12 +156,12 @@ func RemoveBucketObjectByTags(minioClient *minio.Client, BucketName *string, for
 			rch := make(chan minio.ObjectInfo, 1000) // Канал передачи оюъектов в метод удаления
 			var rwg sync.WaitGroup                   // Группа синхронизации для метода удаления ccmultiple
 			rwg.Add(1)
-			go ccmultiple(minioClient, BucketName, rch, &rwg) // Запуск горутины удаления объектов
+			go ccmultiple(client, BucketName, rch, &rwg) // Запуск горутины удаления объектов
 			// Для метода фикса объектов
 			fixObjCh := make(chan minio.ObjectInfo, 1000) // Канал передачи оюъектов в метод фикса цикличных объектов
 			if fixleak {
 				rwg.Add(1)
-				go fixleakObjects(BucketName, fixObjCh, &rwg, rch, leakcount, indexpool, minioClient, interactive) // Запуск горутины применения фикса к объектам
+				go fixleakObjects(BucketName, fixObjCh, &rwg, rch, leakcount, indexpool, client, interactive) // Запуск горутины применения фикса к объектам
 			}
 			check_objects_count := 0
 			skiplist, e := os.ReadFile("./skiplist.txt")
@@ -238,12 +239,12 @@ func RemoveBucketObjectByTags(minioClient *minio.Client, BucketName *string, for
 			rch := make(chan minio.ObjectInfo, 1000) // Канал передачи оюъектов в метод удаления
 			var rwg sync.WaitGroup                   // Группа синхронизации для метода удаления ccmultiple
 			rwg.Add(1)
-			go ccmultiple(minioClient, BucketName, rch, &rwg) // Запуск горутины удаления объектов
+			go ccmultiple(client, BucketName, rch, &rwg) // Запуск горутины удаления объектов
 			// Для метода фикса объектов
 			fixObjCh := make(chan minio.ObjectInfo, 1000) // Канал передачи оюъектов в метод фикса цикличных объектов
 			if fixleak {
 				rwg.Add(1)
-				go fixleakObjects(BucketName, fixObjCh, &rwg, rch, leakcount, indexpool, minioClient, interactive) // Запуск горутины применения фикса к объектам
+				go fixleakObjects(BucketName, fixObjCh, &rwg, rch, leakcount, indexpool, client, interactive) // Запуск горутины применения фикса к объектам
 			}
 			check_objects_count := 0
 			skiplist, e := os.ReadFile("./skiplist.txt")
@@ -333,7 +334,7 @@ func cc(object minio.ObjectInfo, minioClient *minio.Client, BucketName *string, 
 
 // Метод удаления объектов из бакета по LastModified
 // Удаляются все объекты с наименьшей LastModified датой
-func RmObjectByLastModified(minioClient *minio.Client, BucketName *string, force *bool,
+func RmObjectByLastModified(client *global.GlobalClient, BucketName *string, force *bool,
 	dryrun bool, fixleak bool, leakcount int, indexpool string, interactive bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -342,17 +343,17 @@ func RmObjectByLastModified(minioClient *minio.Client, BucketName *string, force
 	rch := make(chan minio.ObjectInfo, 1000) // Канал передачи оюъектов в метод удаления
 	var rwg sync.WaitGroup                   // Группа синхронизации для метода удаления ccmultiple
 	rwg.Add(1)
-	go ccmultiple(minioClient, BucketName, rch, &rwg) // Запуск горутины удаления объектов
+	go ccmultiple(client, BucketName, rch, &rwg) // Запуск горутины удаления объектов
 
 	// Для метода фикса объектов
 	fixObjCh := make(chan minio.ObjectInfo, 1000) // Канал передачи оюъектов в метод фикса цикличных объектов
 	if fixleak {
 		rwg.Add(1)
-		go fixleakObjects(BucketName, fixObjCh, &rwg, rch, leakcount, indexpool, minioClient, interactive) // Запуск горутины применения фикса к объектам
+		go fixleakObjects(BucketName, fixObjCh, &rwg, rch, leakcount, indexpool, client, interactive) // Запуск горутины применения фикса к объектам
 	}
 
 	// Проверяем что bucket существует
-	f, e := bucketoperations.CheckBucketExist(minioClient, BucketName)
+	f, e := bucketoperations.CheckBucketExist(client, BucketName)
 	if e != nil {
 		logrus.Error(e)
 		return e
@@ -366,7 +367,7 @@ func RmObjectByLastModified(minioClient *minio.Client, BucketName *string, force
 
 	// Получаем все объекты из bucket
 	logrus.Info("Get bucket objects list...")
-	objectCh := minioClient.ListObjects(ctx, *BucketName, minio.ListObjectsOptions{
+	objectCh := client.MinioClient.ListObjects(ctx, *BucketName, minio.ListObjectsOptions{
 		Prefix:       "",
 		Recursive:    true,
 		WithVersions: true,
@@ -455,7 +456,7 @@ func RmObjectByLastModified(minioClient *minio.Client, BucketName *string, force
 // если count для объекта превысит leakcount то можно считать что объект цикличный и удалить его index из
 // гарда индексного пула
 func fixleakObjects(BucketName *string, fixObjCh <-chan minio.ObjectInfo, wg *sync.WaitGroup,
-	rch chan minio.ObjectInfo, leakcount int, indexpool string, minioClient *minio.Client, interactive bool) {
+	rch chan minio.ObjectInfo, leakcount int, indexpool string, client *global.GlobalClient, interactive bool) {
 	// Мапа хранения обрабатываемых объектов
 	etagcouter := map[string]*struct {
 		Size         int64
@@ -489,7 +490,7 @@ func fixleakObjects(BucketName *string, fixObjCh <-chan minio.ObjectInfo, wg *sy
 				}
 				// Реализация удаления индекса связанного с объектом rgw
 				logrus.Warn("Detect leack object: Etag: ", object.ETag, " Key: ", object.Key, " IsLatest: ", object.IsLatest)
-				e := deleteObjectIndexFromIndexPool(*BucketName, object, indexpool, minioClient, interactive)
+				e := deleteObjectIndexFromIndexPool(*BucketName, object, indexpool, client, interactive)
 				if e != nil {
 					logrus.Error("Error delete object form index pool: ", e)
 				} else {
@@ -528,7 +529,8 @@ func fixleakObjects(BucketName *string, fixObjCh <-chan minio.ObjectInfo, wg *sy
 }
 
 // Метод удаления объекта из индексного пула
-func deleteObjectIndexFromIndexPool(bucket string, object minio.ObjectInfo, indexpoolname string, minioClient *minio.Client, interactive bool) error {
+func deleteObjectIndexFromIndexPool(bucket string, object minio.ObjectInfo, indexpoolname string,
+	client *global.GlobalClient, interactive bool) error {
 	// Получаем элементы индекса объекта
 	objectindex, e := getObjectIndexEntryes(bucket, object.Key)
 	if e != nil {
@@ -559,7 +561,7 @@ func deleteObjectIndexFromIndexPool(bucket string, object minio.ObjectInfo, inde
 	// Cкачиваем объект в папку бекапа - бекап объекта перед удалением
 	os.Mkdir("backup", 0644)
 	os.Chdir("./backup")
-	e = GetObject(minioClient, &object.Key, &bucket, &object.VersionID)
+	e = GetObject(client, &object.Key, &bucket, &object.VersionID)
 	if e != nil {
 		logrus.Error("Failed create backup file!", e)
 	} else {
@@ -652,7 +654,7 @@ func deleteObjectIndexFromIndexPool(bucket string, object minio.ObjectInfo, inde
 		if s, e := filepath.Abs("./" + object.Key); e != nil {
 			if s == object.Key {
 				ctx := context.Background()
-				e = PutBucketObject(minioClient, &bname, &bucket, ctx, nil, "", interactive)
+				e = PutBucketObject(client, &bname, &bucket, ctx, nil, "", interactive)
 				if e != nil {
 					logrus.Error("Failed restore object from backup!")
 				}
@@ -808,13 +810,13 @@ func getIndexValue(i int, d []byte, indexpoolname string, shard string) ([]byte,
 }
 
 // Для массового удаления можно воспользоваться данным механизмом удаления объектов из бакета
-func ccmultiple(minioClient *minio.Client, BucketName *string, objectsCh <-chan minio.ObjectInfo, wg *sync.WaitGroup) {
+func ccmultiple(client *global.GlobalClient, BucketName *string, objectsCh <-chan minio.ObjectInfo, wg *sync.WaitGroup) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer wg.Done()
 	defer cancel()
 
 	// Пока в каналде есть объекты передаем их методу api для массового удаления
-	for e := range minioClient.RemoveObjects(ctx, *BucketName, objectsCh, minio.RemoveObjectsOptions{GovernanceBypass: true}) {
+	for e := range client.MinioClient.RemoveObjects(ctx, *BucketName, objectsCh, minio.RemoveObjectsOptions{GovernanceBypass: true}) {
 		if e.Err != nil {
 			logrus.Error("Failed remove object: ", e.ObjectName, "VersionID: ", e.VersionID, " Err: ", e.Err)
 		}

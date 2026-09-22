@@ -5,13 +5,13 @@ import (
 	"flag"
 	"io"
 	bucketoperations "minioclient/bucket_operations"
+	"minioclient/global"
 	"minioclient/helps"
 	objectoperations "minioclient/object_operations"
 	"minioclient/tui"
 	"minioclient/utils"
 	"os"
 
-	"github.com/minio/minio-go/v7"
 	"github.com/sirupsen/logrus"
 )
 
@@ -61,7 +61,7 @@ var (
 )
 
 // Глобальная переменная клиента
-var Client *minio.Client
+var Client global.GlobalClient
 
 // Инициализация флагов запуска
 func init() {
@@ -126,11 +126,12 @@ func init() {
 
 	// Создаем клиента для подключения к кластеру
 	var e error
-	Client, e = utils.InitClient(EndPoint, Port, AccessKeyID, SecretAccessKey, UseSSL)
+	client, e := utils.InitClient(EndPoint, Port, AccessKeyID, SecretAccessKey, UseSSL, *Interactive)
 	if e != nil {
 		logrus.Error("Error init client!")
 		os.Exit(1)
 	}
+	Client.MinioClient = client
 }
 
 func main() {
@@ -149,7 +150,7 @@ func main() {
 
 	// Если не какие аргументы не переданны то запускаем TUI
 	if *Interactive {
-		tui.App(Client, *Interactive, UseSSL)
+		tui.App(&Client, *Interactive, UseSSL)
 		os.Exit(0)
 	}
 
@@ -158,7 +159,7 @@ func main() {
 		// Контекст выполнения операции миграции данных
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		e := objectoperations.MigrateObjects(Client, *BucketName, *Prefix, *Destination, UseSSL,
+		e := objectoperations.MigrateObjects(&Client, *BucketName, *Prefix, *Destination, UseSSL,
 			*MaxEntrues, *DtsBucketName, *Debug, *Interactive, ctx, cancel, nil)
 		if e != nil {
 			logrus.Fatal("Error migrate operation!", e.Error())
@@ -169,7 +170,7 @@ func main() {
 
 	// Создание нового bucket с проверкой что он уже не существует
 	if *MakeBucket && *BucketName != "" {
-		e := bucketoperations.MakeBucket(Client, BucketName, Region, ObjectLocking)
+		e := bucketoperations.MakeBucket(&Client, BucketName, Region, ObjectLocking)
 		if e != nil {
 			logrus.Fatal(e)
 		}
@@ -178,7 +179,7 @@ func main() {
 
 	// Удаление существющего bucket
 	if *DeleteBucket && *BucketName != "" {
-		e := bucketoperations.DeleteBucket(Client, BucketName)
+		e := bucketoperations.DeleteBucket(&Client, BucketName)
 		if e != nil {
 			logrus.Fatal(e)
 		}
@@ -187,7 +188,7 @@ func main() {
 
 	// Просмотр доступных buckets
 	if *ListBuckets {
-		_, e := bucketoperations.ListBuckets(Client, OutputType)
+		_, e := bucketoperations.ListBuckets(&Client, OutputType)
 		if e != nil {
 			logrus.Fatal(e)
 		}
@@ -195,7 +196,7 @@ func main() {
 	}
 
 	if *ListDirs {
-		_, e := objectoperations.ListBucketDirs(Client, BucketName, OutputType, Prefix, *Interactive, context.Background())
+		_, e := objectoperations.ListBucketDirs(&Client, BucketName, OutputType, Prefix, *Interactive, context.Background())
 		if e != nil {
 			logrus.Fatal(e)
 		}
@@ -204,7 +205,7 @@ func main() {
 
 	// Просмотр объектов в bucket
 	if *ListBucketObjects && *BucketName != "" {
-		e := objectoperations.ListBucketObjects(Client, BucketName, ShowVersions, OutputType, Prefix, *MaxEntrues, *ListPeerObject)
+		e := objectoperations.ListBucketObjects(&Client, BucketName, ShowVersions, OutputType, Prefix, *MaxEntrues, *ListPeerObject)
 		if e != nil {
 			logrus.Fatal(e)
 		}
@@ -213,7 +214,7 @@ func main() {
 
 	// Обновление объекта в bucket
 	if *AppendObject && *BucketName != "" && *Path != "" {
-		e := objectoperations.AppendBucketObject(Client, Path, BucketName)
+		e := objectoperations.AppendBucketObject(&Client, Path, BucketName)
 		if e != nil {
 			logrus.Fatal(e)
 		}
@@ -223,7 +224,7 @@ func main() {
 	// Добавление объекта в bucket
 	if *PutObject && *BucketName != "" && *Path != "" {
 		ctx := context.Background()
-		e := objectoperations.PutBucketObject(Client, Path, BucketName, ctx, nil, *Prefix, *Interactive)
+		e := objectoperations.PutBucketObject(&Client, Path, BucketName, ctx, nil, *Prefix, *Interactive)
 		if e != nil {
 			logrus.Fatal(e)
 		}
@@ -232,7 +233,7 @@ func main() {
 
 	// Получение методанных объекта
 	if *GetObjectStats && *Key != "" && *BucketName != "" {
-		_, e := objectoperations.GetObjectStat(Client, Key, BucketName, VersionID)
+		_, e := objectoperations.GetObjectStat(&Client, Key, BucketName, VersionID)
 		if e != nil {
 			logrus.Fatal(e)
 		}
@@ -241,7 +242,7 @@ func main() {
 
 	// Получение списка не завершенных задач загрузки
 	if *ListIncUpl && *BucketName != "" {
-		objectoperations.ListIncompleteUploads(Client, BucketName, OutputType)
+		objectoperations.ListIncompleteUploads(&Client, BucketName, OutputType)
 		return
 	}
 
@@ -249,7 +250,7 @@ func main() {
 	if *RemoveObject {
 		// Удаление объектов через lastmodify
 		if *BucketName != "" && *ByLastModify {
-			e := objectoperations.RmObjectByLastModified(Client, BucketName, Force, *DryRun, *FixLeak, *LeakCount, *IndexPool, *Interactive)
+			e := objectoperations.RmObjectByLastModified(&Client, BucketName, Force, *DryRun, *FixLeak, *LeakCount, *IndexPool, *Interactive)
 			if e != nil {
 				logrus.Fatal(e)
 			}
@@ -258,7 +259,7 @@ func main() {
 		}
 		// Удаление объектов по их тегу
 		if *BucketName != "" && *ObjectTags != "" {
-			e := objectoperations.RemoveBucketObjectByTags(Client, BucketName, Force, *ObjectTags, *Not, *DryRun, *FixLeak, *LeakCount, *IndexPool, *Interactive)
+			e := objectoperations.RemoveBucketObjectByTags(&Client, BucketName, Force, *ObjectTags, *Not, *DryRun, *FixLeak, *LeakCount, *IndexPool, *Interactive)
 			if e != nil {
 				logrus.Fatal(e)
 			}
@@ -266,7 +267,7 @@ func main() {
 		}
 		// Удаление отдельного объекта по клющу и версии
 		if *BucketName != "" && *Key != "" {
-			e := objectoperations.RemoveObject(Client, Key, BucketName, Force, VersionID, *DryRun)
+			e := objectoperations.RemoveObject(&Client, Key, BucketName, Force, VersionID, *DryRun)
 			if e != nil {
 				logrus.Fatal(e)
 			}
@@ -274,7 +275,7 @@ func main() {
 		}
 		// Массовое удаление объектов из JSON файла
 		if *BucketName != "" && *Path != "" && *Key == "" {
-			e := objectoperations.RemoveBucketObjects(Client, BucketName, Force, *Path, *DryRun)
+			e := objectoperations.RemoveBucketObjects(&Client, BucketName, Force, *Path, *DryRun)
 			if e != nil {
 				logrus.Fatal(e)
 			}
@@ -284,7 +285,7 @@ func main() {
 
 	// Получение свойств объекта
 	if *GetObject && *Key != "" && *BucketName != "" {
-		e := objectoperations.GetObject(Client, Key, BucketName, VersionID)
+		e := objectoperations.GetObject(&Client, Key, BucketName, VersionID)
 		if e != nil {
 			logrus.Fatal(e)
 		}

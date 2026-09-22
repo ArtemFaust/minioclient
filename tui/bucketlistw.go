@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	bucketoperations "minioclient/bucket_operations"
+	"minioclient/global"
 	objectoperations "minioclient/object_operations"
 	filedialog "minioclient/tui/customwidgets/filedialog"
 	"minioclient/utils"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/epiclabs-io/winman"
 	"github.com/gdamore/tcell/v2"
-	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/lifecycle"
 	"github.com/minio/minio-go/v7/pkg/notification"
 	"github.com/rivo/tview"
@@ -29,7 +29,7 @@ import (
 var GET_BUCKETS_WORK_STATUS bool
 
 // Метод создания окна BUCKET LIST
-func makeBucketListWindow(wm *winman.Manager, minioClient *minio.Client, app *tview.Application,
+func makeBucketListWindow(wm *winman.Manager, client *global.GlobalClient, app *tview.Application,
 	footer *winman.WindowBase, logger chan string, interactive bool, usessl *bool) {
 	bucketlist := wm.NewWindow()  // Создание нового окна
 	bucketlist.SetDraggable(true) // Делаем окно перемечаемым
@@ -67,7 +67,7 @@ func makeBucketListWindow(wm *winman.Manager, minioClient *minio.Client, app *tv
 			// можно выполнить операцию refresh
 			if !GET_BUCKETS_WORK_STATUS {
 				bucketlist.GetRoot().(*tview.List).Clear()
-				bucketlist.SetRoot(getBucketList(minioClient, wm, app, footer, logger, bucketlist, interactive))
+				bucketlist.SetRoot(getBucketList(client, wm, app, footer, logger, bucketlist, interactive))
 			}
 		},
 	})
@@ -88,27 +88,27 @@ func makeBucketListWindow(wm *winman.Manager, minioClient *minio.Client, app *tv
 			modal := wm.NewWindow()
 			modallist := tview.NewList().
 				AddItem("Создать", "", '➕', func() {
-					createNewBucket(minioClient, wm, app, bucketlist, modal, footer, logger, bucketlist, interactive)
+					createNewBucket(client, wm, app, bucketlist, modal, footer, logger, bucketlist, interactive)
 					modal.Hide()
 				}).SetShortcutColor(tcell.NewRGBColor(0, 0, 0)).
 				AddItem("Удалить", "", '➖', func() {
 					if bucket_name != "" {
-						deleteBucket(minioClient, wm, app, bucketlist, modal, bucket_name, footer, logger, bucketlist, interactive)
+						deleteBucket(client, wm, app, bucketlist, modal, bucket_name, footer, logger, bucketlist, interactive)
 					}
 					modal.Hide()
 				}).SetShortcutColor(tcell.NewRGBColor(0, 0, 0)).
 				AddItem("Свойства", "", '❔', func() {
 					if bucket_name != "" {
-						getBucketInfo(minioClient, wm, app, bucket_name, logger)
+						getBucketInfo(client, wm, app, bucket_name, logger)
 					}
 					modal.Hide()
 				}).SetShortcutColor(tcell.NewRGBColor(0, 0, 0)).
 				AddItem("Мигрировать", "", '🔄', func() {
-					initMigrateBucketOperation(wm, app, bucket_name, logger, minioClient, usessl)
+					initMigrateBucketOperation(wm, app, bucket_name, logger, client, usessl)
 					modal.Hide()
 				}).
 				AddItem("Закрыть меню", "", '❌', func() { modal.Hide() }).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
-			modal.SetRect(x+10, y, 20, 10)
+			modal.SetRect(x+10, y, 22, 12)
 			modal.SetModal(true)
 			modal.SetRoot(modallist)
 			app.SetFocus(modal)
@@ -116,7 +116,7 @@ func makeBucketListWindow(wm *winman.Manager, minioClient *minio.Client, app *tv
 		},
 	})
 
-	bucketlist.SetRoot(getBucketList(minioClient, wm, app, footer, logger, bucketlist, interactive)) // Получаем список бакетов
+	bucketlist.SetRoot(getBucketList(client, wm, app, footer, logger, bucketlist, interactive)) // Получаем список бакетов
 
 	_, h, _ := term.GetSize(int(os.Stdout.Fd())) // Высота терминала
 	_, _, _, fh := footer.GetRect()              // Высота footer
@@ -126,7 +126,7 @@ func makeBucketListWindow(wm *winman.Manager, minioClient *minio.Client, app *tv
 }
 
 // Метод создания списка бакетов
-func getBucketList(minioClient *minio.Client, wm *winman.Manager, app *tview.Application,
+func getBucketList(client *global.GlobalClient, wm *winman.Manager, app *tview.Application,
 	footer *winman.WindowBase, logger chan string, bucketlist *winman.WindowBase, interactive bool) *tview.List {
 	// Прогресс выполнения операции
 	pm, ch := progress(wm, app, "Запрос списка бакетов")
@@ -146,7 +146,7 @@ func getBucketList(minioClient *minio.Client, wm *winman.Manager, app *tview.App
 			GET_BUCKETS_WORK_STATUS = false // Указываем что операция завершилась
 		}()
 
-		buckets, e := bucketoperations.ListBuckets(minioClient, nil)
+		buckets, e := bucketoperations.ListBuckets(client, nil)
 		if e != nil {
 			makeErrorModal(wm, app, e.Error())
 			logger <- e.Error()
@@ -159,7 +159,7 @@ func getBucketList(minioClient *minio.Client, wm *winman.Manager, app *tview.App
 			count++
 			ch <- fmt.Sprintf("Полученно объектов: %v", count)
 			list.AddItem(b.Name, b.CreationDate.Format("2006-01-02"), '📁', func() {
-				makeObjectsListWindow(wm, minioClient, b.Name, "", "", app, footer, logger, interactive)
+				makeObjectsListWindow(wm, client, b.Name, "", "", app, footer, logger, interactive)
 			}).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
 		}
 		bucketlist.SetBorderColor(tcell.Color101)
@@ -170,7 +170,7 @@ func getBucketList(minioClient *minio.Client, wm *winman.Manager, app *tview.App
 }
 
 // Метод создания нового бакета вызываемый из контекстного меню
-func createNewBucket(minioClient *minio.Client, wm *winman.Manager, app *tview.Application, window *winman.WindowBase,
+func createNewBucket(client *global.GlobalClient, wm *winman.Manager, app *tview.Application, window *winman.WindowBase,
 	modal *winman.WindowBase, footer *winman.WindowBase,
 	logger chan string, bucketlist *winman.WindowBase, interactive bool) {
 	region := "us-east-1"
@@ -195,13 +195,13 @@ func createNewBucket(minioClient *minio.Client, wm *winman.Manager, app *tview.A
 		}).
 		AddButton("Создать", func() {
 			logger <- "Создание нового бакета"
-			e := bucketoperations.MakeBucket(minioClient, &new_bucket_name, &region, &ol)
+			e := bucketoperations.MakeBucket(client, &new_bucket_name, &region, &ol)
 			if e != nil {
 				// Показываем модальное окно с ошибкой
 				makeErrorModal(wm, app, e.Error())
 				logger <- fmt.Sprintf("Ошибка создания бакета %s: %s"+new_bucket_name, e.Error())
 			} else {
-				window.SetRoot(getBucketList(minioClient, wm, app, footer, logger, bucketlist, interactive))
+				window.SetRoot(getBucketList(client, wm, app, footer, logger, bucketlist, interactive))
 				logger <- fmt.Sprintf("Создание бакета %s выполненно успешно", new_bucket_name)
 				wm.RemoveWindow(m)
 			}
@@ -219,7 +219,7 @@ func createNewBucket(minioClient *minio.Client, wm *winman.Manager, app *tview.A
 }
 
 // Метод удаления бакета вызываемый из контекстного меню
-func deleteBucket(minioClient *minio.Client, wm *winman.Manager, app *tview.Application, window *winman.WindowBase,
+func deleteBucket(client *global.GlobalClient, wm *winman.Manager, app *tview.Application, window *winman.WindowBase,
 	modal *winman.WindowBase, bucket_name string, footer *winman.WindowBase,
 	logger chan string, bucketlist *winman.WindowBase, interactive bool) {
 	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
@@ -230,13 +230,13 @@ func deleteBucket(minioClient *minio.Client, wm *winman.Manager, app *tview.Appl
 	form := tview.NewForm().
 		AddButton("Удалить", func() {
 			logger <- "Удаление бакета " + bucket_name
-			e := bucketoperations.DeleteBucket(minioClient, &bucket_name)
+			e := bucketoperations.DeleteBucket(client, &bucket_name)
 			if e != nil {
 				// Показываем модальное окно с ошибкой
 				makeErrorModal(wm, app, e.Error())
 				logger <- fmt.Sprintf("Ошибка удаления бакета %s: %s", bucket_name, e.Error())
 			} else {
-				window.SetRoot(getBucketList(minioClient, wm, app, footer, logger, bucketlist, interactive))
+				window.SetRoot(getBucketList(client, wm, app, footer, logger, bucketlist, interactive))
 				logger <- fmt.Sprintf("Удаления бакета %s выполненно успешно", bucket_name)
 			}
 			wm.RemoveWindow(m)
@@ -254,19 +254,19 @@ func deleteBucket(minioClient *minio.Client, wm *winman.Manager, app *tview.Appl
 }
 
 // Метод получения информации о бакете вызываемый из контекстного меню
-func getBucketInfo(minioClient *minio.Client, wm *winman.Manager, app *tview.Application, bucket_name string,
+func getBucketInfo(client *global.GlobalClient, wm *winman.Manager, app *tview.Application, bucket_name string,
 	logger chan string) {
 	logger <- "Запрос свойств бакета"
 	bi := bucketoperations.BucketInfo{
 		Name: &bucket_name,
 	}
 
-	bi.Make(minioClient)
-	makeBucketInfoModal(minioClient, wm, app, logger, bi)
+	bi.Make(client)
+	makeBucketInfoModal(client, wm, app, logger, bi)
 }
 
 // Создание модального окна свойст бакета
-func makeBucketInfoModal(minioClient *minio.Client, wm *winman.Manager, app *tview.Application,
+func makeBucketInfoModal(client *global.GlobalClient, wm *winman.Manager, app *tview.Application,
 	logger chan string, bi bucketoperations.BucketInfo) {
 
 	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
@@ -300,7 +300,7 @@ func makeBucketInfoModal(minioClient *minio.Client, wm *winman.Manager, app *tvi
 		AddButton("Применить", func() {
 			status := true
 			// Смена параметров версионирования
-			e := bi.ChangeVersioningSettings(minioClient, versioning)
+			e := bi.ChangeVersioningSettings(client, versioning)
 			if e != nil {
 				status = false
 				logger <- fmt.Sprintf("Ошибка смены статуса версионирования для бакета %s : %s", *bi.Name, e.Error())
@@ -309,7 +309,7 @@ func makeBucketInfoModal(minioClient *minio.Client, wm *winman.Manager, app *tvi
 			}
 
 			// Установка политики бакета
-			e = bi.ChangeBucketPolicy(minioClient, policy)
+			e = bi.ChangeBucketPolicy(client, policy)
 			if e != nil {
 				tpol.SetBorderColor(tcell.ColorRed)
 				status = false
@@ -320,7 +320,7 @@ func makeBucketInfoModal(minioClient *minio.Client, wm *winman.Manager, app *tvi
 			}
 
 			// Установка LC
-			e = bi.ChangeBucketLc(minioClient, lc)
+			e = bi.ChangeBucketLc(client, lc)
 			if e != nil {
 				ttlc.SetBorderColor(tcell.ColorRed)
 				status = false
@@ -331,7 +331,7 @@ func makeBucketInfoModal(minioClient *minio.Client, wm *winman.Manager, app *tvi
 			}
 
 			// Установка NOTOFICATION
-			e = bi.ChangeNotificationConfig(minioClient, notif)
+			e = bi.ChangeNotificationConfig(client, notif)
 			if e != nil {
 				tnotif.SetBorderColor(tcell.ColorRed)
 				status = false
@@ -498,7 +498,7 @@ func fileselectB(wm *winman.Manager, app *tview.Application, logger chan string,
 
 // Метод инициализации миграции бакета
 func initMigrateBucketOperation(wm *winman.Manager, app *tview.Application,
-	sourcebucketname string, logger chan string, fomclient *minio.Client, usessl *bool) {
+	sourcebucketname string, logger chan string, fomclient *global.GlobalClient, usessl *bool) {
 
 	var toendpoint string
 	var dstbucketname string
@@ -519,7 +519,7 @@ func initMigrateBucketOperation(wm *winman.Manager, app *tview.Application,
 			var items []string
 			cfg, e := utils.Readcfg()
 			if e != nil {
-				logger <- "Error read cfg file: " + e.Error()
+				logger <- "Ошибка чтения файла конфигурации: " + e.Error()
 				return items
 			}
 			for _, connection := range cfg.Connections {
@@ -537,6 +537,10 @@ func initMigrateBucketOperation(wm *winman.Manager, app *tview.Application,
 		AddButton("Мигрировать", func() {
 			// Выполняем миграцию объектов в отдельном потоке
 			go func() {
+				if dstbucketname == "" {
+					logger <- "Ошибка миграции бакета: destination bucket name is empty"
+					return
+				}
 				// Прогресс выполнения операции
 				pm, ch := progress(wm, app, "Миграция бакета: "+sourcebucketname)
 
@@ -571,7 +575,6 @@ func initMigrateBucketOperation(wm *winman.Manager, app *tview.Application,
 		AddButton("Отмена", func() {
 			wm.RemoveWindow(m)
 		})
-
 	m.SetRoot(form)
 	m.SetTitle("Миграция бакета")
 	m.AddButton(&winman.Button{

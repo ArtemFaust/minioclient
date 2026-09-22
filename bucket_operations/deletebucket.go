@@ -3,8 +3,8 @@ package bucketoperations
 import (
 	"context"
 	"fmt"
+	"minioclient/global"
 
-	"github.com/minio/minio-go/v7"
 	"github.com/sirupsen/logrus"
 )
 
@@ -12,8 +12,8 @@ import (
 // удаление возможно только bucket в котором
 // нет файлов
 // при удаление не пустого bucket возникнет ошибка
-func DeleteBucket(minioClient *minio.Client, BucketName *string) error {
-	f, e := CheckBucketExist(minioClient, BucketName)
+func DeleteBucket(client *global.GlobalClient, BucketName *string) error {
+	f, e := CheckBucketExist(client, BucketName)
 	if e != nil {
 		logrus.Error(e)
 		return e
@@ -22,7 +22,7 @@ func DeleteBucket(minioClient *minio.Client, BucketName *string) error {
 		logrus.Error("bucket ", *BucketName, " not found")
 		return fmt.Errorf("bucket %s not found", *BucketName)
 	}
-	e = minioClient.RemoveBucket(context.Background(), *BucketName)
+	e = client.MinioClient.RemoveBucket(context.Background(), *BucketName)
 	if e != nil {
 		logrus.Error(e)
 		return e

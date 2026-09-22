@@ -2,17 +2,19 @@ package tui
 
 import (
 	"context"
+	"minioclient/global"
+	"os"
 
 	"github.com/epiclabs-io/winman"
 	"github.com/gdamore/tcell/v2"
-	"github.com/minio/minio-go/v7"
 	"github.com/rivo/tview"
+	"github.com/sirupsen/logrus"
 )
 
-func App(minioClient *minio.Client, interactive bool, usessl *bool) {
+func App(client *global.GlobalClient, interactive bool, usessl *bool) {
 
 	ctx, cancel := context.WithCancel(context.Background())
-
+	defer cancel()
 	app := tview.NewApplication()   // Инициализация приложения
 	wm := winman.NewWindowManager() // Инициализация менеджера окон
 
@@ -20,11 +22,11 @@ func App(minioClient *minio.Client, interactive bool, usessl *bool) {
 	wm.SetTitle("S3 FILE MANAGER").SetTitleColor(tcell.Color101)
 	wm.Blur()
 
-	footer, logger := makeFoooter(wm, app, minioClient, ctx)
-	makeBucketListWindow(wm, minioClient, app, footer, logger, interactive, usessl)
+	footer, logger := makeFoooter(wm, app, client, ctx, *usessl)
+	makeBucketListWindow(wm, client, app, footer, logger, interactive, usessl)
 
-	if err := app.SetRoot(wm, true).EnableMouse(true).Run(); err != nil {
-		panic(err)
+	if e := app.SetRoot(wm, true).EnableMouse(true).Run(); e != nil {
+		logrus.Error("Error init tui interface: ", e.Error())
+		os.Exit(1)
 	}
-	cancel()
 }

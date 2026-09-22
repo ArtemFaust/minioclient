@@ -12,7 +12,7 @@ import (
 )
 
 // Метод инициализации клиента
-func InitClient(endpoint *string, port *string, accessKeyID *string, secretAccessKey *string, useSSL *bool) (*minio.Client, error) {
+func InitClient(endpoint *string, port *string, accessKeyID *string, secretAccessKey *string, useSSL *bool, interactive bool) (*minio.Client, error) {
 	// Снача ищем данное подключение в конфигурации
 	// Считывание конфигурационного файла
 	cfg, e := Readcfg()
@@ -25,13 +25,21 @@ func InitClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 		// что передан внешний endpoint и нуждны доп аргументы для подключения
 		if *port == "" || *endpoint == "" || *secretAccessKey == "" ||
 			port == nil || endpoint == nil || secretAccessKey == nil {
-			logrus.Error("Please provide port access key id and secret key!")
-			os.Exit(1)
+			if !interactive {
+				logrus.Error("Please provide port access key id and secret key!")
+				os.Exit(1)
+			} else {
+				return nil, e
+			}
 		}
 		client, e := makeClient(endpoint, port, accessKeyID, secretAccessKey, useSSL)
 		if e != nil {
-			logrus.Error("Failed to create client!")
-			os.Exit(1)
+			if !interactive {
+				logrus.Error("Failed to create client!")
+				os.Exit(1)
+			} else {
+				return nil, e
+			}
 		}
 		return client, nil
 		// Если конфигурацию нашли и ее удалось прочитать
@@ -69,13 +77,21 @@ func InitClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 		// что передан внешний endpoint и нуждны доп аргументы для подключения
 		if *port == "" || *accessKeyID == "" || *secretAccessKey == "" ||
 			port == nil || endpoint == nil || secretAccessKey == nil {
-			logrus.Error("Please provide port access key id and secret key!")
-			os.Exit(1)
+			if !interactive {
+				logrus.Error("Please provide port access key id and secret key!")
+				os.Exit(1)
+			} else {
+				return nil, e
+			}
 		}
 		client, e := makeClient(endpoint, port, accessKeyID, secretAccessKey, useSSL)
 		if e != nil {
-			logrus.Error("Failed to create client!")
-			os.Exit(1)
+			if !interactive {
+				logrus.Error("Failed to create client!")
+				os.Exit(1)
+			} else {
+				return nil, e
+			}
 		}
 		return client, nil
 	}
@@ -83,6 +99,7 @@ func InitClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 
 // Метод создания подключения к minio серверу
 func makeClient(endpoint *string, port *string, accessKeyID *string, secretAccessKey *string, useSSL *bool) (*minio.Client, error) {
+	client := global.GlobalClient{}
 	minioClient, e := minio.New(*endpoint+":"+*port, &minio.Options{
 		Creds:           credentials.NewStaticV4(*accessKeyID, *secretAccessKey, ""),
 		Secure:          *useSSL,
@@ -95,7 +112,9 @@ func makeClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 	}
 	logrus.Info("client created")
 
-	b := ConnectionHealthCheck(minioClient)
+	client.MinioClient = minioClient
+
+	b := ConnectionHealthCheck(&client)
 	if !b {
 		logrus.Error("connection health check failed")
 		return nil, errors.New("connection health check failed")

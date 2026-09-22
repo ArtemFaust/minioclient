@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"minioclient/global"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/sirupsen/logrus"
@@ -11,8 +12,8 @@ import (
 
 // Метод получения методанных объекта
 // возвращает методанные указанног ообъекта
-func GetObjectStat(minioClient *minio.Client, Key *string, BucketName *string, versionid *string) (string, error) {
-	objInfo, e := minioClient.StatObject(context.Background(), *BucketName, *Key, minio.StatObjectOptions{
+func GetObjectStat(client *global.GlobalClient, Key *string, BucketName *string, versionid *string) (string, error) {
+	objInfo, e := client.MinioClient.StatObject(context.Background(), *BucketName, *Key, minio.StatObjectOptions{
 		VersionID: *versionid,
 		Checksum:  true,
 	})

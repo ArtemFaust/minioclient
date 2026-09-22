@@ -3,6 +3,7 @@ package objectoperations
 import (
 	"bufio"
 	"context"
+	"minioclient/global"
 	"os"
 
 	"github.com/minio/minio-go/v7"
@@ -10,7 +11,7 @@ import (
 )
 
 // Метод обновление данных в существующем объекте
-func AppendBucketObject(minioClient *minio.Client, Path *string, BucketName *string) error {
+func AppendBucketObject(client *global.GlobalClient, Path *string, BucketName *string) error {
 	opt := minio.AppendObjectOptions{}
 	f, e := os.Open(*Path)
 	if e != nil {
@@ -26,7 +27,7 @@ func AppendBucketObject(minioClient *minio.Client, Path *string, BucketName *str
 	// Загрузка отдельного файла
 	if !f_stat.IsDir() {
 		logrus.Info("appended file name: ", f_stat.Name(), " size: ", f_stat.Size(), " bytes")
-		info, e := minioClient.AppendObject(
+		info, e := client.MinioClient.AppendObject(
 			context.Background(),
 			*BucketName,
 			f_stat.Name(),

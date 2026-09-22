@@ -2,15 +2,15 @@ package bucketoperations
 
 import (
 	"context"
+	"minioclient/global"
 
-	"github.com/minio/minio-go/v7"
 	"github.com/sirupsen/logrus"
 )
 
 // Метод проверки существования bucket
 // если bucket существует возвращает true иначе false
-func CheckBucketExist(minioClient *minio.Client, BucketName *string) (bool, error) {
-	found, e := minioClient.BucketExists(context.Background(), *BucketName)
+func CheckBucketExist(client *global.GlobalClient, BucketName *string) (bool, error) {
+	found, e := client.MinioClient.BucketExists(context.Background(), *BucketName)
 	if e != nil {
 		logrus.Error(e)
 		return false, e

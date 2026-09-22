@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	bucketoperations "minioclient/bucket_operations"
+	"minioclient/global"
 	"strings"
 
 	"github.com/fatih/color"
@@ -15,12 +16,13 @@ import (
 
 // Метод просмотра объектов в bucket
 // возвращет все объекты относчиеся к bucket
-func ListBucketObjects(minioClient *minio.Client, BucketName *string, ShowVersions *bool, o *string, prefix *string, maxentry int, tablepeerobjects int) error {
+func ListBucketObjects(client *global.GlobalClient, BucketName *string,
+	ShowVersions *bool, o *string, prefix *string, maxentry int, tablepeerobjects int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Проверяем что bucket существует
-	f, e := bucketoperations.CheckBucketExist(minioClient, BucketName)
+	f, e := bucketoperations.CheckBucketExist(client, BucketName)
 	if e != nil {
 		logrus.Error(e)
 		return e
@@ -40,7 +42,7 @@ func ListBucketObjects(minioClient *minio.Client, BucketName *string, ShowVersio
 	})*/
 
 	// Получаем объеккты из бакета
-	objectCh := minioClient.ListObjects(ctx, *BucketName, minio.ListObjectsOptions{
+	objectCh := client.MinioClient.ListObjects(ctx, *BucketName, minio.ListObjectsOptions{
 		Prefix:       *prefix,
 		Recursive:    true,
 		WithVersions: *ShowVersions,
@@ -58,9 +60,10 @@ func ListBucketObjects(minioClient *minio.Client, BucketName *string, ShowVersio
 }
 
 // Метод просмотра директорий в bucket
-func ListBucketDirs(minioClient *minio.Client, BucketName *string, o *string, prefix *string, interactive bool, ctx context.Context) (<-chan minio.ObjectInfo, error) {
+func ListBucketDirs(client *global.GlobalClient, BucketName *string, o *string,
+	prefix *string, interactive bool, ctx context.Context) (<-chan minio.ObjectInfo, error) {
 	// Проверяем что bucket существует
-	f, e := bucketoperations.CheckBucketExist(minioClient, BucketName)
+	f, e := bucketoperations.CheckBucketExist(client, BucketName)
 	if e != nil {
 		logrus.Error(e)
 		return nil, e
@@ -74,7 +77,7 @@ func ListBucketDirs(minioClient *minio.Client, BucketName *string, o *string, pr
 	}
 
 	// Получаем объеккты из бакета
-	objectCh := minioClient.ListObjects(ctx, *BucketName, minio.ListObjectsOptions{
+	objectCh := client.MinioClient.ListObjects(ctx, *BucketName, minio.ListObjectsOptions{
 		Prefix:       *prefix,
 		Recursive:    false,
 		WithVersions: false,

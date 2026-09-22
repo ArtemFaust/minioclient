@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"minioclient/global"
 	"os"
 	"path/filepath"
 
@@ -15,7 +16,7 @@ import (
 
 // Метод создания нового объекта
 // ( обновление если объект существует создавая версию файла)
-func PutBucketObject(minioClient *minio.Client, Path *string, BucketName *string, ctx context.Context, ch chan string, prefix string, interactive bool) error {
+func PutBucketObject(client *global.GlobalClient, Path *string, BucketName *string, ctx context.Context, ch chan string, prefix string, interactive bool) error {
 	// Открываем фаил
 	f, e := os.Open(*Path)
 	if e != nil {
@@ -50,7 +51,7 @@ func PutBucketObject(minioClient *minio.Client, Path *string, BucketName *string
 			}
 		}
 
-		uploadInfo, e := minioClient.PutObject(
+		uploadInfo, e := client.MinioClient.PutObject(
 			ctx,
 			*BucketName,
 			func() string {
@@ -119,7 +120,7 @@ func PutBucketObject(minioClient *minio.Client, Path *string, BucketName *string
 					}
 				}
 				// Загружаем фаил
-				uploadInfo, e := minioClient.PutObject(
+				uploadInfo, e := client.MinioClient.PutObject(
 					ctx,
 					*BucketName,
 					func() string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"minioclient/global"
 	"minioclient/utils"
 	"os"
 	"strings"
@@ -45,7 +46,7 @@ var finishreport report
 // fromclient - клиент кластера источника
 // bucketname - имя бакета источника
 // toname - название кластера назначения в конфигурации
-func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string,
+func MigrateObjects(fromclient *global.GlobalClient, bucketname string, prefix string,
 	toendpoint string, usessl *bool, maxentry int, dstbucketname string, debug bool,
 	interactive bool, ctx context.Context, cancel context.CancelFunc, eventch chan string) error {
 
@@ -55,14 +56,18 @@ func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string,
 	}
 
 	// Запускаем поток отлеживание событий нажатия класиш
-	go readKeyboardEvents(ctx, debug, cancel)
+	if !interactive {
+		go readKeyboardEvents(ctx, debug, cancel)
+	}
 
 	// Создаем клиента для кластера назначения
-	toclient, e := utils.InitClient(&toendpoint, nil, nil, nil, usessl)
+	var toclient *global.GlobalClient
+	tclient, e := utils.InitClient(&toendpoint, nil, nil, nil, usessl, interactive)
 	if e != nil {
 		logrus.Error(fmt.Sprintf("Error init client for destination cluster %s", e.Error()))
 		return e
 	}
+	toclient.MinioClient = tclient
 
 	objch := make(chan minio.ObjectInfo) // Создаем канал указанного размера для записи объектов продюсеру
 	sigch := make(chan bool, maxentry)   // Создаем управляющий канал контроля горутин
@@ -74,7 +79,7 @@ func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string,
 
 	// Проверяем существует ли бакет в клaстере назначения
 	// Если не существует то бакет нужно создать
-	found, e := toclient.BucketExists(context.Background(), dstbucketname)
+	found, e := toclient.MinioClient.BucketExists(context.Background(), dstbucketname)
 	if e != nil {
 		logrus.Error("Error check bucket status on destination! interruption of execution", e.Error())
 		return e
@@ -82,15 +87,15 @@ func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string,
 
 	// Если бакет в кластере назначения не найден то пытаемся его создать
 	if !found {
-		logrus.Info("Bucket ", dstbucketname, " on endpoint ", toclient.EndpointURL(), " does not exist. Creating bucket...")
-		e := toclient.MakeBucket(ctx, dstbucketname, minio.MakeBucketOptions{})
+		logrus.Info("Bucket ", dstbucketname, " on endpoint ", toclient.MinioClient.EndpointURL(), " does not exist. Creating bucket...")
+		e := toclient.MinioClient.MakeBucket(ctx, dstbucketname, minio.MakeBucketOptions{})
 		if e != nil {
 			// Если не удалось создать бакет то выводим ошибку и завершаем выполнение программы
 			logrus.Error("Error create bucket! interruption of execution", e.Error())
 			return e
 		}
 	} else {
-		logrus.Info("Bucket ", dstbucketname, " on endpoint ", toclient.EndpointURL(), " already ", "exist.")
+		logrus.Info("Bucket ", dstbucketname, " on endpoint ", toclient.MinioClient.EndpointURL(), " already ", "exist.")
 	}
 
 	// Получаем список объектов бакета по переданному префиксу
@@ -114,7 +119,7 @@ func MigrateObjects(fromclient *minio.Client, bucketname string, prefix string,
 
 // Обработчик операции обхода директории бакета
 func processInit(sourcelist <-chan minio.ObjectInfo, ctx context.Context,
-	toclient *minio.Client, bucketname string, fromclient *minio.Client, objch chan minio.ObjectInfo) {
+	toclient *global.GlobalClient, bucketname string, fromclient *global.GlobalClient, objch chan minio.ObjectInfo) {
 	// Обработка объектов бакета
 	for obj := range sourcelist {
 		logrus.Info("Prepaire to migrate object: ", obj.Key)
@@ -142,7 +147,7 @@ func processInit(sourcelist <-chan minio.ObjectInfo, ctx context.Context,
 
 // Инициатор миграции объекта бакета
 func migrateProducer(objch chan minio.ObjectInfo, ctx context.Context, bucketname string,
-	fromclient *minio.Client, toclient *minio.Client,
+	fromclient *global.GlobalClient, toclient *global.GlobalClient,
 	wg *sync.WaitGroup, sigch chan bool, dstbucketname string, mu *sync.Mutex, eventch chan string) {
 	for obj := range objch {
 		select {
@@ -158,8 +163,8 @@ func migrateProducer(objch chan minio.ObjectInfo, ctx context.Context, bucketnam
 }
 
 // Обработчик миграции объекта бакета
-func migrateObject(key string, bucketname string, fromclient *minio.Client,
-	toclient *minio.Client, ctx context.Context, sigch chan bool,
+func migrateObject(key string, bucketname string, fromclient *global.GlobalClient,
+	toclient *global.GlobalClient, ctx context.Context, sigch chan bool,
 	wg *sync.WaitGroup, dstbucketname string, mu *sync.Mutex, eventch chan string) {
 
 	defer wg.Done()                  // ообщаем об окончании выполнении горутины
@@ -170,7 +175,7 @@ func migrateObject(key string, bucketname string, fromclient *minio.Client,
 		return
 	default:
 		logrus.Info("Migrate object: ", key)
-		sourceobj, e := fromclient.GetObject(context.Background(), bucketname, key, minio.GetObjectOptions{
+		sourceobj, e := fromclient.MinioClient.GetObject(context.Background(), bucketname, key, minio.GetObjectOptions{
 			VersionID: "", // Версионирование не поддерживается мы работаем только с актуальной версией объекта в бакете
 			Checksum:  true,
 		})
@@ -198,7 +203,7 @@ func migrateObject(key string, bucketname string, fromclient *minio.Client,
 		}
 
 		// Записываем объект в бакет назначения
-		_, e = toclient.PutObject(ctx, dstbucketname, key, sourceobj, stat.Size,
+		_, e = toclient.MinioClient.PutObject(ctx, dstbucketname, key, sourceobj, stat.Size,
 			minio.PutObjectOptions{ContentType: "application/octet-stream"})
 		if e != nil {
 			logrus.Error(fmt.Sprintf("Error migrate object: %s Erros: %s", key, e.Error()))

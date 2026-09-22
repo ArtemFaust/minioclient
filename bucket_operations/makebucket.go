@@ -3,6 +3,7 @@ package bucketoperations
 import (
 	"context"
 	"errors"
+	"minioclient/global"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/sirupsen/logrus"
@@ -11,8 +12,8 @@ import (
 // Метод создания нового bucket
 // сщздает новый bucket с указанным именем
 // если bucket существет то возврашет ошибку
-func MakeBucket(minioClient *minio.Client, BucketName *string, Region *string, ol *bool) error {
-	f, e := CheckBucketExist(minioClient, BucketName)
+func MakeBucket(client *global.GlobalClient, BucketName *string, Region *string, ol *bool) error {
+	f, e := CheckBucketExist(client, BucketName)
 	if e != nil {
 		return e
 	}
@@ -20,7 +21,7 @@ func MakeBucket(minioClient *minio.Client, BucketName *string, Region *string, o
 		logrus.Error("bucket ", *BucketName, " alredi exist")
 		return errors.New("bucket alredi exist")
 	}
-	e = minioClient.MakeBucket(
+	e = client.MinioClient.MakeBucket(
 		context.Background(),
 		*BucketName,
 		minio.MakeBucketOptions{Region: *Region, ObjectLocking: *ol},

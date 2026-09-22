@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"minioclient/global"
 	"os"
 	"path/filepath"
 
@@ -11,8 +12,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func GetObject(minioClient *minio.Client, Key *string, BucketName *string, versionid *string) error {
-	obj, e := minioClient.GetObject(context.Background(), *BucketName, *Key, minio.GetObjectOptions{
+func GetObject(client *global.GlobalClient, Key *string, BucketName *string, versionid *string) error {
+	obj, e := client.MinioClient.GetObject(context.Background(), *BucketName, *Key, minio.GetObjectOptions{
 		VersionID: *versionid,
 		Checksum:  true,
 	})

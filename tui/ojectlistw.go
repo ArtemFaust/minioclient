@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"minioclient/global"
 	objectoperations "minioclient/object_operations"
 	filedialog "minioclient/tui/customwidgets/filedialog"
 	"os"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/epiclabs-io/winman"
 	"github.com/gdamore/tcell/v2"
-	"github.com/minio/minio-go/v7"
 	"github.com/rivo/tview"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
@@ -26,7 +26,7 @@ import (
 var GET_OBJECTS_WORK_STATUS bool
 
 // Метод создания окна BUCKET OBJECT LIST
-func makeObjectsListWindow(wm *winman.Manager, minioClient *minio.Client, bucketname string, prefix string,
+func makeObjectsListWindow(wm *winman.Manager, client *global.GlobalClient, bucketname string, prefix string,
 	title string, app *tview.Application, footer *winman.WindowBase, logger chan string, interactive bool) {
 
 	// Контекст передаваемый в метод получения списка объектов бакета
@@ -77,7 +77,7 @@ func makeObjectsListWindow(wm *winman.Manager, minioClient *minio.Client, bucket
 			// можно выполнить операцию refresh
 			if !GET_OBJECTS_WORK_STATUS {
 				objectlist.GetRoot().(*tview.List).Clear()
-				objectlist.SetRoot(getObjectList(minioClient, bucketname, prefix, wm, app, footer, logger, ctx, objectlist, interactive))
+				objectlist.SetRoot(getObjectList(client, bucketname, prefix, wm, app, footer, logger, ctx, objectlist, interactive))
 			}
 		},
 	})
@@ -103,17 +103,17 @@ func makeObjectsListWindow(wm *winman.Manager, minioClient *minio.Client, bucket
 						prefix = strings.Split(objectlist.GetTitle(), bucketname)[1][1:] // Префикс формируем из заголовка окна
 					}
 					logger <- prefix
-					fileselectO(wm, app, "Загрузка объектов в бакет", logger, bucketname, minioClient, prefix, interactive)
+					fileselectO(wm, app, "Загрузка объектов в бакет", logger, bucketname, client, prefix, interactive)
 					modal.Hide()
 				}).
 				AddItem("Скачать выбранное", "", '🔽', func() {
 					main, _ := objectlist.GetRoot().(*tview.List).GetItemText(objectlist.GetRoot().(*tview.List).GetCurrentItem())
-					go download(wm, app, minioClient, bucketname, main, "", logger)
+					go download(wm, app, client, bucketname, main, "", logger)
 					modal.Hide()
 				}).
 				AddItem("Свойства", "", '❔', func() {
 					main, _ := objectlist.GetRoot().(*tview.List).GetItemText(objectlist.GetRoot().(*tview.List).GetCurrentItem())
-					getObjectInfo(minioClient, wm, app, bucketname, logger,
+					getObjectInfo(client, wm, app, bucketname, logger,
 						main,
 					)
 					modal.Hide()
@@ -123,7 +123,7 @@ func makeObjectsListWindow(wm *winman.Manager, minioClient *minio.Client, bucket
 				}).
 				AddItem("Удалить", "", '➖', func() {
 					main, _ := objectlist.GetRoot().(*tview.List).GetItemText(objectlist.GetRoot().(*tview.List).GetCurrentItem())
-					go remove(wm, app, minioClient, bucketname, main, "", logger)
+					go remove(wm, app, client, bucketname, main, "", logger)
 					modal.Hide()
 				}).
 				AddItem("Закрыть", "", '❌', func() { modal.Hide() })
@@ -135,7 +135,7 @@ func makeObjectsListWindow(wm *winman.Manager, minioClient *minio.Client, bucket
 		},
 	})
 
-	objectlist.SetRoot(getObjectList(minioClient, bucketname, prefix, wm, app, footer, logger, ctx, objectlist, interactive)) // Получаем список бакетов
+	objectlist.SetRoot(getObjectList(client, bucketname, prefix, wm, app, footer, logger, ctx, objectlist, interactive)) // Получаем список бакетов
 	// rect для текучего окна в фокусе
 	x, y, w, _ := app.GetFocus().GetRect()
 	_, h, _ := term.GetSize(int(os.Stdout.Fd())) // Высота терминала
@@ -147,7 +147,7 @@ func makeObjectsListWindow(wm *winman.Manager, minioClient *minio.Client, bucket
 }
 
 // Метод создания списка объектов
-func getObjectList(minioClient *minio.Client, bucketname string, prefix string, wm *winman.Manager,
+func getObjectList(client *global.GlobalClient, bucketname string, prefix string, wm *winman.Manager,
 	app *tview.Application, footer *winman.WindowBase, logger chan string, ctx context.Context,
 	objectlist *winman.WindowBase, interactive bool) *tview.List {
 	pm, ch := progress(wm, app, "Запрос списка объектов бакета")
@@ -167,7 +167,7 @@ func getObjectList(minioClient *minio.Client, bucketname string, prefix string, 
 			GET_OBJECTS_WORK_STATUS = false // Указываем что операция завершилась
 		}()
 
-		objectCh, e := objectoperations.ListBucketDirs(minioClient, &bucketname, nil, &prefix, true, ctx)
+		objectCh, e := objectoperations.ListBucketDirs(client, &bucketname, nil, &prefix, true, ctx)
 		if e != nil {
 			logrus.Error(e)
 			logger <- fmt.Sprintf("Ошибка запрос списка объектов бакета %s: %s", bucketname, e.Error())
@@ -186,7 +186,7 @@ func getObjectList(minioClient *minio.Client, bucketname string, prefix string, 
 			if strings.HasSuffix(o.Key, "/") {
 				key := o.Key
 				list.AddItem(o.Key, "", '📁', func() {
-					makeObjectsListWindow(wm, minioClient, bucketname, key, bucketname+"/"+key, app, footer, logger, interactive)
+					makeObjectsListWindow(wm, client, bucketname, key, bucketname+"/"+key, app, footer, logger, interactive)
 				}).SetMainTextColor(tcell.ColorBlue).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
 			} else {
 				list.AddItem(o.Key, "", '📄', nil).SetMainTextColor(tcell.ColorYellow).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
@@ -201,7 +201,7 @@ func getObjectList(minioClient *minio.Client, bucketname string, prefix string, 
 
 // Метод выбора файла для загрузки
 func fileselectO(wm *winman.Manager, app *tview.Application, title string, logger chan string,
-	bucketname string, minioClient *minio.Client, prefix string, interactive bool) {
+	bucketname string, client *global.GlobalClient, prefix string, interactive bool) {
 
 	m := wm.NewWindow()
 	homedir, e := os.UserHomeDir()
@@ -212,7 +212,7 @@ func fileselectO(wm *winman.Manager, app *tview.Application, title string, logge
 	fd := filedialog.NewFileDialog(homedir, func(filePath string) {
 		wm.RemoveWindow(m)
 		go func() {
-			upload(wm, app, logger, minioClient, filePath, bucketname, prefix, homedir, interactive)
+			upload(wm, app, logger, client, filePath, bucketname, prefix, homedir, interactive)
 		}()
 	})
 
@@ -229,7 +229,7 @@ func fileselectO(wm *winman.Manager, app *tview.Application, title string, logge
 	m.AddButton(&winman.Button{
 		Symbol: '⏫',
 		OnClick: func() {
-			go upload(wm, app, logger, minioClient, fd.CurrentSelectedDir, bucketname, prefix, homedir, interactive)
+			go upload(wm, app, logger, client, fd.CurrentSelectedDir, bucketname, prefix, homedir, interactive)
 		},
 	})
 
@@ -240,7 +240,7 @@ func fileselectO(wm *winman.Manager, app *tview.Application, title string, logge
 
 // Метод загрузки объекта или директории в бакет
 func upload(wm *winman.Manager, app *tview.Application, logger chan string,
-	minioClient *minio.Client, filePath string, bucketname string, prefix string, basepath string, interactive bool) {
+	client *global.GlobalClient, filePath string, bucketname string, prefix string, basepath string, interactive bool) {
 	// Контекст исполнения
 	ctx, cancel := context.WithCancel(context.Background())
 	// Прогресс выполнения операции
@@ -266,7 +266,7 @@ func upload(wm *winman.Manager, app *tview.Application, logger chan string,
 	os.Chdir(basepath)
 	rel, e := filepath.Rel(basepath, filePath)
 	if e != nil {
-		e = objectoperations.PutBucketObject(minioClient, &filePath, &bucketname, ctx, ch, prefix, interactive)
+		e = objectoperations.PutBucketObject(client, &filePath, &bucketname, ctx, ch, prefix, interactive)
 
 		if e != nil {
 			logger <- fmt.Sprintf("Ошибка загрузки объекта: %s", e.Error())
@@ -277,7 +277,7 @@ func upload(wm *winman.Manager, app *tview.Application, logger chan string,
 		}
 	} else {
 
-		e = objectoperations.PutBucketObject(minioClient, &rel, &bucketname, ctx, ch, prefix, interactive)
+		e = objectoperations.PutBucketObject(client, &rel, &bucketname, ctx, ch, prefix, interactive)
 
 		if e != nil {
 			logger <- fmt.Sprintf("Ошибка загрузки объекта: %s", e.Error())
@@ -291,7 +291,7 @@ func upload(wm *winman.Manager, app *tview.Application, logger chan string,
 }
 
 // Метод получения информации об объекте бакета (только конечный объект)
-func getObjectInfo(minioClient *minio.Client, wm *winman.Manager, app *tview.Application, bucket_name string,
+func getObjectInfo(client *global.GlobalClient, wm *winman.Manager, app *tview.Application, bucket_name string,
 	logger chan string, objectkey string) {
 	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
 	m := wm.NewWindow()
@@ -309,7 +309,7 @@ func getObjectInfo(minioClient *minio.Client, wm *winman.Manager, app *tview.App
 	v := tview.NewTextArea()
 
 	vid := ""
-	s, e := objectoperations.GetObjectStat(minioClient, &objectkey, &bucket_name, &vid)
+	s, e := objectoperations.GetObjectStat(client, &objectkey, &bucket_name, &vid)
 	if e != nil {
 		logger <- fmt.Sprintf("Ошибка получения свойств объекта: %s", e.Error())
 	}
@@ -322,7 +322,7 @@ func getObjectInfo(minioClient *minio.Client, wm *winman.Manager, app *tview.App
 }
 
 // Метод выгрузки объекта или директории из бакета на локальную машину
-func download(wm *winman.Manager, app *tview.Application, minioClient *minio.Client,
+func download(wm *winman.Manager, app *tview.Application, client *global.GlobalClient,
 	bucketname string, objectkey string, ver string, logger chan string) {
 	// Контекст выполнения
 	ctx, cancel := context.WithCancel(context.Background())
@@ -381,11 +381,11 @@ func download(wm *winman.Manager, app *tview.Application, minioClient *minio.Cli
 
 	// Загрузка единичного объекта
 	if len(objectkey) > 0 && objectkey[len(objectkey)-1] != '/' {
-		downloadSingeObject(minioClient, bucketname, objectkey, ver, logger, ch, ctx)
+		downloadSingeObject(client, bucketname, objectkey, ver, logger, ch, ctx)
 		pm.SetBorderColor(tcell.ColorGreen) // По окончанию выполнения поля делаем зелеными
 		// Загрузка директории целиком
 	} else {
-		processDirectory(minioClient, bucketname, objectkey, ver, logger, ch, ctx, "download")
+		processDirectory(client, bucketname, objectkey, ver, logger, ch, ctx, "download")
 		pm.SetBorderColor(tcell.ColorGreen) // По окончанию выполнения поля делаем зелеными
 	}
 
@@ -398,14 +398,14 @@ func download(wm *winman.Manager, app *tview.Application, minioClient *minio.Cli
 }
 
 // Обработчик операции загрузки объекта из бакета
-func downloadSingeObject(minioClient *minio.Client, bucketname string,
+func downloadSingeObject(client *global.GlobalClient, bucketname string,
 	objectkey string, ver string, logger chan string, ch chan string, ctx context.Context) {
 	select {
 	// Если контекст выполнения отменен то прерываем выполнение
 	case <-ctx.Done():
 		return
 	default:
-		e := objectoperations.GetObject(minioClient, &objectkey, &bucketname, &ver)
+		e := objectoperations.GetObject(client, &objectkey, &bucketname, &ver)
 		if e != nil {
 			logger <- fmt.Sprintf("Ошибка загрузки объекта: %s", e.Error())
 			ch <- fmt.Sprintf("Failed downloaded file: %s ", func(o string) string {
@@ -429,7 +429,7 @@ func downloadSingeObject(minioClient *minio.Client, bucketname string,
 }
 
 // Метод удаления объектов бакета
-func remove(wm *winman.Manager, app *tview.Application, minioClient *minio.Client, bucketname string,
+func remove(wm *winman.Manager, app *tview.Application, client *global.GlobalClient, bucketname string,
 	objectkey string, ver string, logger chan string) {
 
 	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
@@ -439,7 +439,7 @@ func remove(wm *winman.Manager, app *tview.Application, minioClient *minio.Clien
 	m.SetRect(w/3, h/4, 30, 5)
 	form := tview.NewForm().
 		AddButton("Удалить", func() {
-			go removeAccept(wm, app, minioClient, bucketname, objectkey, ver, logger)
+			go removeAccept(wm, app, client, bucketname, objectkey, ver, logger)
 			wm.RemoveWindow(m)
 		}).
 		AddButton("Отмена", func() {
@@ -453,7 +453,7 @@ func remove(wm *winman.Manager, app *tview.Application, minioClient *minio.Clien
 }
 
 // Метод инициализации процедуры удаления объектов из бакета
-func removeAccept(wm *winman.Manager, app *tview.Application, minioClient *minio.Client, bucketname string,
+func removeAccept(wm *winman.Manager, app *tview.Application, client *global.GlobalClient, bucketname string,
 	objectkey string, ver string, logger chan string) {
 	// Контекст выполнения
 	ctx, cancel := context.WithCancel(context.Background())
@@ -474,16 +474,16 @@ func removeAccept(wm *winman.Manager, app *tview.Application, minioClient *minio
 	}()
 
 	if len(objectkey) > 0 && objectkey[len(objectkey)-1] != '/' {
-		removeSingleObject(minioClient, bucketname, objectkey, ver, logger, ch, ctx)
+		removeSingleObject(client, bucketname, objectkey, ver, logger, ch, ctx)
 		pm.SetBorderColor(tcell.ColorGreen) // По окончанию выполнения поля делаем зелеными
 	} else {
-		processDirectory(minioClient, bucketname, objectkey, ver, logger, ch, ctx, "remove")
+		processDirectory(client, bucketname, objectkey, ver, logger, ch, ctx, "remove")
 		pm.SetBorderColor(tcell.ColorGreen) // По окончанию выполнения поля делаем зелеными
 	}
 }
 
 // Обработчик удаления объекта из бакета
-func removeSingleObject(minioClient *minio.Client, bucketname string,
+func removeSingleObject(client *global.GlobalClient, bucketname string,
 	objectkey string, ver string, logger chan string, ch chan string, ctx context.Context) {
 	select {
 	case <-ctx.Done():
@@ -491,7 +491,7 @@ func removeSingleObject(minioClient *minio.Client, bucketname string,
 	default:
 		// Удаляем объект
 		force := true
-		e := objectoperations.RemoveObject(minioClient, &objectkey, &bucketname, &force, &ver, false)
+		e := objectoperations.RemoveObject(client, &objectkey, &bucketname, &force, &ver, false)
 		if e != nil {
 			ch <- fmt.Sprintf("Failed remove file: %s ", func(o string) string {
 				if len(strings.Split(objectkey, "/")) > 1 {
@@ -515,9 +515,9 @@ func removeSingleObject(minioClient *minio.Client, bucketname string,
 }
 
 // Обработчик операции обхода директории бакета
-func processDirectory(minioClient *minio.Client, bucketname string,
+func processDirectory(client *global.GlobalClient, bucketname string,
 	objectkey string, ver string, logger chan string, ch chan string, ctx context.Context, operation string) {
-	list, e := objectoperations.ListBucketDirs(minioClient, &bucketname, nil, &objectkey, true, ctx)
+	list, e := objectoperations.ListBucketDirs(client, &bucketname, nil, &objectkey, true, ctx)
 	if e != nil {
 		logger <- fmt.Sprintf("Ошибка получения списка объектов директории: %s", e.Error())
 		return
@@ -534,19 +534,19 @@ func processDirectory(minioClient *minio.Client, bucketname string,
 				// Загрузка объекта
 				if obj.Key[len(obj.Key)-1] != '/' {
 					// Если это не директория, загрузка объекта
-					downloadSingeObject(minioClient, bucketname, obj.Key, ver, logger, ch, ctx)
+					downloadSingeObject(client, bucketname, obj.Key, ver, logger, ch, ctx)
 					// Обработка вложенных директорий бакета (вызываем сами себя)
 				} else {
-					processDirectory(minioClient, bucketname, obj.Key, ver, logger, ch, ctx, operation)
+					processDirectory(client, bucketname, obj.Key, ver, logger, ch, ctx, operation)
 				}
 			case "remove":
 				// Удаление объекта
 				if obj.Key[len(obj.Key)-1] != '/' {
 					// Если это не директория, загрузка объекта
-					removeSingleObject(minioClient, bucketname, obj.Key, ver, logger, ch, ctx)
+					removeSingleObject(client, bucketname, obj.Key, ver, logger, ch, ctx)
 					// Обработка вложенных директорий бакета (вызываем сами себя)
 				} else {
-					processDirectory(minioClient, bucketname, obj.Key, ver, logger, ch, ctx, operation)
+					processDirectory(client, bucketname, obj.Key, ver, logger, ch, ctx, operation)
 				}
 			}
 		}

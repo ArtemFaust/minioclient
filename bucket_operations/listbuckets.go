@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"minioclient/global"
 
 	"github.com/fatih/color"
 	"github.com/minio/minio-go/v7"
@@ -12,8 +13,8 @@ import (
 )
 
 // Метод получения списка доступных bucket
-func ListBuckets(minioClient *minio.Client, o *string) ([]minio.BucketInfo, error) {
-	buckets, e := minioClient.ListBuckets(context.Background())
+func ListBuckets(client *global.GlobalClient, o *string) ([]minio.BucketInfo, error) {
+	buckets, e := client.MinioClient.ListBuckets(context.Background())
 	if e != nil {
 		logrus.Error(e)
 		return buckets, e

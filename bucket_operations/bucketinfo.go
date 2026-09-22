@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"minioclient/global"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/cors"
@@ -21,8 +22,8 @@ type BucketInfo struct {
 	Policy                    string
 }
 
-func (b *BucketInfo) Make(minioClient *minio.Client) {
-	f, e := CheckBucketExist(minioClient, b.Name)
+func (b *BucketInfo) Make(client *global.GlobalClient) {
+	f, e := CheckBucketExist(client, b.Name)
 	if !f {
 		return
 	}
@@ -30,38 +31,38 @@ func (b *BucketInfo) Make(minioClient *minio.Client) {
 		return
 	}
 	b.Versioning = func() minio.BucketVersioningConfiguration {
-		v, _ := minioClient.GetBucketVersioning(context.Background(), *b.Name)
+		v, _ := client.MinioClient.GetBucketVersioning(context.Background(), *b.Name)
 		return v
 	}()
 
 	b.Location = func() string {
-		location, _ := minioClient.GetBucketLocation(context.Background(), *b.Name)
+		location, _ := client.MinioClient.GetBucketLocation(context.Background(), *b.Name)
 		return location
 	}()
 
 	b.LifeCycle = func() *lifecycle.Configuration {
-		lc, _ := minioClient.GetBucketLifecycle(context.Background(), *b.Name)
+		lc, _ := client.MinioClient.GetBucketLifecycle(context.Background(), *b.Name)
 		return lc
 	}()
 
 	b.NotificationConfiguration = func() notification.Configuration {
-		notif, _ := minioClient.GetBucketNotification(context.Background(), *b.Name)
+		notif, _ := client.MinioClient.GetBucketNotification(context.Background(), *b.Name)
 		return notif
 	}()
 
 	b.Cors = func() *cors.Config {
-		cors, _ := minioClient.GetBucketCors(context.Background(), *b.Name)
+		cors, _ := client.MinioClient.GetBucketCors(context.Background(), *b.Name)
 		return cors
 	}()
 
 	b.Policy = func() string {
-		policy, _ := minioClient.GetBucketPolicy(context.Background(), *b.Name)
+		policy, _ := client.MinioClient.GetBucketPolicy(context.Background(), *b.Name)
 		return policy
 	}()
 }
 
-func (b *BucketInfo) ChangeVersioningSettings(minioClient *minio.Client, enable bool) error {
-	f, e := CheckBucketExist(minioClient, b.Name)
+func (b *BucketInfo) ChangeVersioningSettings(client *global.GlobalClient, enable bool) error {
+	f, e := CheckBucketExist(client, b.Name)
 	if !f {
 		return errors.New("bucket not found")
 	}
@@ -69,16 +70,16 @@ func (b *BucketInfo) ChangeVersioningSettings(minioClient *minio.Client, enable 
 		return e
 	}
 	if enable {
-		e = minioClient.EnableVersioning(context.Background(), *b.Name)
+		e = client.MinioClient.EnableVersioning(context.Background(), *b.Name)
 		return e
 	} else {
-		e = minioClient.SuspendVersioning(context.Background(), *b.Name)
+		e = client.MinioClient.SuspendVersioning(context.Background(), *b.Name)
 		return e
 	}
 }
 
-func (b *BucketInfo) ChangeBucketPolicy(minioClient *minio.Client, policy string) error {
-	f, e := CheckBucketExist(minioClient, b.Name)
+func (b *BucketInfo) ChangeBucketPolicy(client *global.GlobalClient, policy string) error {
+	f, e := CheckBucketExist(client, b.Name)
 	if !f {
 		return errors.New("bucket not found")
 	}
@@ -89,13 +90,13 @@ func (b *BucketInfo) ChangeBucketPolicy(minioClient *minio.Client, policy string
 	if !json.Valid([]byte(policy)) {
 		return errors.New("not valid json object")
 	}
-	return minioClient.SetBucketPolicy(context.Background(), *b.Name, policy)
+	return client.MinioClient.SetBucketPolicy(context.Background(), *b.Name, policy)
 }
 
-func (b *BucketInfo) ChangeBucketLc(minioClient *minio.Client, config *lifecycle.Configuration) error {
-	return minioClient.SetBucketLifecycle(context.Background(), *b.Name, config)
+func (b *BucketInfo) ChangeBucketLc(client *global.GlobalClient, config *lifecycle.Configuration) error {
+	return client.MinioClient.SetBucketLifecycle(context.Background(), *b.Name, config)
 }
 
-func (b *BucketInfo) ChangeNotificationConfig(minioClient *minio.Client, config notification.Configuration) error {
-	return minioClient.SetBucketNotification(context.Background(), *b.Name, config)
+func (b *BucketInfo) ChangeNotificationConfig(client *global.GlobalClient, config notification.Configuration) error {
+	return client.MinioClient.SetBucketNotification(context.Background(), *b.Name, config)
 }

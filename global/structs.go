@@ -1,6 +1,11 @@
 package global
 
-import "time"
+import (
+	"sync"
+	"time"
+
+	"github.com/minio/minio-go/v7"
+)
 
 // Описание структуры конфигурации
 //type Cfg struct {
@@ -11,6 +16,19 @@ import "time"
 //		Secretkey string   `yaml:"secretkey"`
 //	} `yaml:"minioclientcfg"`
 //}
+
+// Структура клиента
+type GlobalClient struct {
+	MinioClient *minio.Client // Сам клиент
+	Mu          sync.Mutex    // Мутикс для блокировки дсотупа к клиенту
+}
+
+// Метод обновления клиента
+func (gc *GlobalClient) UpdateClient(newclient *minio.Client) {
+	gc.Mu.Lock()
+	gc.MinioClient = newclient
+	gc.Mu.Unlock()
+}
 
 type Cfg struct {
 	Connections []struct {

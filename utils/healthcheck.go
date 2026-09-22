@@ -2,14 +2,13 @@ package utils
 
 import (
 	"context"
+	"minioclient/global"
 	"time"
-
-	"github.com/minio/minio-go/v7"
 )
 
-func ConnectionHealthCheck(client *minio.Client) bool {
+func ConnectionHealthCheck(client *global.GlobalClient) bool {
 	context, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	_, e := client.ListBuckets(context)
+	_, e := client.MinioClient.ListBuckets(context)
 	cancel()
 	if e != nil {
 		return false
