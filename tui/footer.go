@@ -95,6 +95,7 @@ func makeFoooter(wm *winman.Manager, app *tview.Application,
 						logger <- "Подключение к " + selected + " успешно"
 						client.UpdateClient(newclient)
 						m.SetBorderColor(tcell.ColorGreen)
+
 					}
 				}).
 				AddButton("Отмена", func() {
@@ -111,25 +112,26 @@ func makeFoooter(wm *winman.Manager, app *tview.Application,
 			app.SetFocus(m)
 		},
 	})
+	// Фоновое обновление иконки (анимация)
 	go func(ctx context.Context) {
-		elements := []rune{'🌎', '🌍', '🌏', '🌑'}
+		elements := []rune{'🌎', '🌍', '🌏'}
 		i := 0
 		for {
+			time.Sleep(500 * time.Millisecond)
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				time.Sleep(500 * time.Millisecond)
 				box.GetButton(0).Symbol = elements[i]
 				i++
-				if i == len(elements)-1 {
+				if i == len(elements) {
 					i = 0
 				}
 			}
-
 		}
 
 	}(ctx)
+
 	box1 := wm.NewWindow()
 	box1.SetTitle("Лог операций")
 	box1.SetBorderColor(tcell.Color101)
@@ -138,6 +140,24 @@ func makeFoooter(wm *winman.Manager, app *tview.Application,
 		Symbol:  '🧾',
 		OnClick: func() {},
 	})
+	// Фоновое обновление иконки (анимация)
+	go func(ctx context.Context) {
+		elements := []rune{'🧾', '📃', '📄'}
+		i := 0
+		for {
+			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				box1.GetButton(0).Symbol = elements[i]
+				i++
+				if i == len(elements) {
+					i = 0
+				}
+			}
+		}
+	}(ctx)
 
 	loglist := tview.NewList() // Логер событий
 

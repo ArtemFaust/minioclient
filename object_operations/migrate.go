@@ -61,7 +61,7 @@ func MigrateObjects(fromclient *global.GlobalClient, bucketname string, prefix s
 	}
 
 	// Создаем клиента для кластера назначения
-	var toclient *global.GlobalClient
+	toclient := global.GlobalClient{}
 	tclient, e := utils.InitClient(&toendpoint, nil, nil, nil, usessl, interactive)
 	if e != nil {
 		logrus.Error(fmt.Sprintf("Error init client for destination cluster %s", e.Error()))
@@ -75,13 +75,13 @@ func MigrateObjects(fromclient *global.GlobalClient, bucketname string, prefix s
 	var mu sync.Mutex                    // Мутикс для синхронизации доступа к репорту (добавление ошибок в массив ошибок)
 	// Иницируем продюсера
 	wg.Add(1)
-	go migrateProducer(objch, ctx, bucketname, fromclient, toclient, &wg, sigch, dstbucketname, &mu, eventch)
+	go migrateProducer(objch, ctx, bucketname, fromclient, &toclient, &wg, sigch, dstbucketname, &mu, eventch)
 
 	// Проверяем существует ли бакет в клaстере назначения
 	// Если не существует то бакет нужно создать
 	found, e := toclient.MinioClient.BucketExists(context.Background(), dstbucketname)
 	if e != nil {
-		logrus.Error("Error check bucket status on destination! interruption of execution", e.Error())
+		logrus.Error("Ошибка проверки существования бакета: ", dstbucketname+" ", e.Error())
 		return e
 	}
 
@@ -91,7 +91,7 @@ func MigrateObjects(fromclient *global.GlobalClient, bucketname string, prefix s
 		e := toclient.MinioClient.MakeBucket(ctx, dstbucketname, minio.MakeBucketOptions{})
 		if e != nil {
 			// Если не удалось создать бакет то выводим ошибку и завершаем выполнение программы
-			logrus.Error("Error create bucket! interruption of execution", e.Error())
+			logrus.Error("Ошибка создания бакета: ", e.Error())
 			return e
 		}
 	} else {
@@ -106,7 +106,7 @@ func MigrateObjects(fromclient *global.GlobalClient, bucketname string, prefix s
 	}
 	logrus.Info("Init migrate process...")
 	// Инициируем операцию миграции данных
-	processInit(sourcelist, ctx, toclient, bucketname, fromclient, objch)
+	processInit(sourcelist, ctx, &toclient, bucketname, fromclient, objch)
 
 	close(objch) // По окончанию обработки объектов из источника закрываем канал объектов для продюсера миграции
 	wg.Wait()    // Дожидаемся окончания всех горутин миграции

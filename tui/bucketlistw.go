@@ -501,7 +501,7 @@ func initMigrateBucketOperation(wm *winman.Manager, app *tview.Application,
 	sourcebucketname string, logger chan string, fomclient *global.GlobalClient, usessl *bool) {
 
 	var toendpoint string
-	var dstbucketname string
+	dstbucketname := sourcebucketname
 	maxentry := 1000
 
 	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
@@ -563,7 +563,7 @@ func initMigrateBucketOperation(wm *winman.Manager, app *tview.Application,
 				e := objectoperations.MigrateObjects(fomclient, sourcebucketname, "",
 					toendpoint, usessl, maxentry, dstbucketname, false, true, ctx, cancel, ch)
 				if e != nil {
-					logger <- fmt.Sprintf("Error execute migration bucket %s objects: %s", sourcebucketname, e.Error())
+					logger <- fmt.Sprintf("Ошибка выполнения миграции бакета bucket %s objects: %s", sourcebucketname, e.Error())
 					pm.SetBorderColor(tcell.ColorRed) // По окончанию выполнения поля делаем red
 					return
 				}

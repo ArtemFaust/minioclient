@@ -162,7 +162,7 @@ func main() {
 		e := objectoperations.MigrateObjects(&Client, *BucketName, *Prefix, *Destination, UseSSL,
 			*MaxEntrues, *DtsBucketName, *Debug, *Interactive, ctx, cancel, nil)
 		if e != nil {
-			logrus.Fatal("Error migrate operation!", e.Error())
+			logrus.Fatal("Error migrate operation! ", e.Error())
 		}
 		logrus.Info("Succesfule done migrate operation")
 		return
