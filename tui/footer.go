@@ -18,7 +18,7 @@ import (
 
 // Метод создания footer
 func makeFoooter(wm *winman.Manager, app *tview.Application,
-	client *global.GlobalClient, ctx context.Context, usessl bool) (*winman.WindowBase, chan string) {
+	client *global.GlobalClient, ctx context.Context, usessl bool, gw *global.GlobalWindows) (*winman.WindowBase, chan string) {
 
 	logger := make(chan string) // Канал записи логов
 
@@ -95,7 +95,9 @@ func makeFoooter(wm *winman.Manager, app *tview.Application,
 						logger <- "Подключение к " + selected + " успешно"
 						client.UpdateClient(newclient)
 						m.SetBorderColor(tcell.ColorGreen)
-
+						// Обновляем список бакетов для нового клиента
+						gw.BucketList.GetRoot().(*tview.List).Clear()
+						gw.BucketList.SetRoot(getBucketList(client, wm, app, footer, logger, gw.BucketList, true))
 					}
 				}).
 				AddButton("Отмена", func() {
@@ -132,13 +134,59 @@ func makeFoooter(wm *winman.Manager, app *tview.Application,
 
 	}(ctx)
 
+	loglist := tview.NewList() // Логер событий
 	box1 := wm.NewWindow()
 	box1.SetTitle("Лог операций")
 	box1.SetBorderColor(tcell.Color101)
 	box1.SetTitleColor(tcell.Color101)
 	box1.AddButton(&winman.Button{
-		Symbol:  '🧾',
-		OnClick: func() {},
+		Symbol: '🧾',
+		OnClick: func() {
+			// Тут мы окрываем большое окно для просмотра событий логирования
+			if loglist.GetItemCount() == 0 {
+				return
+			}
+			w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+			m := wm.NewWindow()
+			m.SetDraggable(true)
+			m.SetBorder(true)
+			m.SetRect(w/3, h/4, w/2, h/2)
+			llist := tview.NewList()
+
+			for eventid := range loglist.GetItemCount() {
+				main, secondary := loglist.GetItemText(eventid)
+				if strings.Contains(secondary, "Ошибка") {
+					llist.AddItem(main, secondary, '🚫', nil).SetSecondaryTextColor(tcell.ColorWhite)
+					//llist.AddItem("", strings.Repeat("-", w), ' ', nil).SetSecondaryTextColor(tcell.ColorWhite)
+				} else {
+					llist.AddItem(main, secondary, '✅', nil).SetSecondaryTextColor(tcell.ColorWhite)
+					//llist.AddItem("", strings.Repeat("-", w), ' ', nil).SetSecondaryTextColor(tcell.ColorWhite)
+				}
+			}
+
+			m.SetRoot(llist)
+			m.SetTitle("Лог операций")
+			m.AddButton(&winman.Button{
+				Symbol:  '❌',
+				OnClick: func() { wm.RemoveWindow(m) },
+			})
+			m.AddButton(&winman.Button{
+				Symbol: '🔼',
+				OnClick: func() {
+					func() {
+						if m.IsMaximized() {
+							m.GetButton(1).Symbol = '🔼'
+							m.Restore()
+						} else {
+							m.GetButton(1).Symbol = '🔽'
+							m.Maximize()
+						}
+					}()
+				},
+			})
+			m.Show()
+			app.SetFocus(m)
+		},
 	})
 	// Фоновое обновление иконки (анимация)
 	go func(ctx context.Context) {
@@ -158,8 +206,6 @@ func makeFoooter(wm *winman.Manager, app *tview.Application,
 			}
 		}
 	}(ctx)
-
-	loglist := tview.NewList() // Логер событий
 
 	box1.SetRoot(loglist)
 

@@ -29,8 +29,9 @@ import (
 var GET_BUCKETS_WORK_STATUS bool
 
 // Метод создания окна BUCKET LIST
+// Возвращает указатель на созданный окно
 func makeBucketListWindow(wm *winman.Manager, client *global.GlobalClient, app *tview.Application,
-	footer *winman.WindowBase, logger chan string, interactive bool, usessl *bool) {
+	footer *winman.WindowBase, logger chan string, interactive bool, usessl *bool) *winman.WindowBase {
 	bucketlist := wm.NewWindow()  // Создание нового окна
 	bucketlist.SetDraggable(true) // Делаем окно перемечаемым
 	bucketlist.SetResizable(true) // Делаем окно маштабируемым
@@ -123,6 +124,7 @@ func makeBucketListWindow(wm *winman.Manager, client *global.GlobalClient, app *
 	bucketlist.SetRect(0, 0, 40, h-fh-2)         // Свойства окна
 	bucketlist.Show()                            // Показываем окно
 	app.SetFocus(bucketlist)
+	return bucketlist
 }
 
 // Метод создания списка бакетов

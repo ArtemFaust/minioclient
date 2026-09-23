@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/epiclabs-io/winman"
 	"github.com/minio/minio-go/v7"
 )
 
@@ -16,6 +17,11 @@ import (
 //		Secretkey string   `yaml:"secretkey"`
 //	} `yaml:"minioclientcfg"`
 //}
+
+// Глобальное хранение ссылок на основные окна
+type GlobalWindows struct {
+	BucketList *winman.WindowBase
+}
 
 // Структура клиента
 type GlobalClient struct {

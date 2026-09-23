@@ -11,6 +11,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// Глобальное хранение ссылок на окна
+var GW global.GlobalWindows
+
 func App(client *global.GlobalClient, interactive bool, usessl *bool) {
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -22,8 +25,8 @@ func App(client *global.GlobalClient, interactive bool, usessl *bool) {
 	wm.SetTitle("S3 FILE MANAGER").SetTitleColor(tcell.Color101)
 	wm.Blur()
 
-	footer, logger := makeFoooter(wm, app, client, ctx, *usessl)
-	makeBucketListWindow(wm, client, app, footer, logger, interactive, usessl)
+	footer, logger := makeFoooter(wm, app, client, ctx, *usessl, &GW)
+	GW.BucketList = makeBucketListWindow(wm, client, app, footer, logger, interactive, usessl)
 
 	if e := app.SetRoot(wm, true).EnableMouse(true).Run(); e != nil {
 		logrus.Error("Error init tui interface: ", e.Error())
