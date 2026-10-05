@@ -27,23 +27,32 @@ type GlobalWindows struct {
 type GlobalClient struct {
 	MinioClient *minio.Client // Сам клиент
 	Mu          sync.Mutex    // Мутикс для блокировки дсотупа к клиенту
+	ClientCfg   *Connection   // Конфигурация клиента
 }
 
 // Метод обновления клиента
-func (gc *GlobalClient) UpdateClient(newclient *minio.Client) {
+func (gc *GlobalClient) UpdateClient(newclient *minio.Client, connection Connection) {
 	gc.Mu.Lock()
 	gc.MinioClient = newclient
+	gc.ClientCfg = &connection
 	gc.Mu.Unlock()
 }
 
 type Cfg struct {
-	Connections []struct {
-		Name      string   `yaml:"name"`
-		Endpoints []string `yaml:"endpoints"`
-		Port      string   `yaml:"port"`
-		Acesskey  string   `yaml:"acesskey"`
-		Secretkey string   `yaml:"secretkey"`
-	} `yaml:"connections"`
+	Connections []Connection `yaml:"connections"`
+}
+
+type Connection struct {
+	Name                  string   `yaml:"name"`
+	Endpoints             []string `yaml:"endpoints"`
+	Port                  string   `yaml:"port"`
+	UseSSL                bool     `yaml:"usessl"`
+	MultipartChecksSum    string   `yaml:"multipartChecksSum"`
+	DisableMultipart      bool     `yaml:"disableMultipart"`
+	SendMd5CheckSum       bool     `yaml:"sendMd5CheckSum"`
+	ConcurrentStreamParts bool     `yaml:"concurrentStreamParts"`
+	Acesskey              string   `yaml:"acesskey"`
+	Secretkey             string   `yaml:"secretkey"`
 }
 
 // Структура обхекта бакета

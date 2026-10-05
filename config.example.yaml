@@ -5,5 +5,10 @@ connections:
       - <endpoint_2>
       - etc
     port: <PORT>
+    usessl: <true|false>
+    multipartChecksSum: <ChecksumCRC32|ChecksumCRC32C|ChecksumCRC64NVME|ChecksumMD5|ChecksumSHA1|ChecksumSHA256|ChecksumSHA512|ChecksumXXHASH3|ChecksumXXHASH64|ChecksumNone>
+    disableMultipart: <true|false> # Если true то multipartChecksSum не учитвается - автоматически ставится ChecksumNone
+    sendMd5CheckSum: <true|false>
+    concurrentStreamParts: <true|false>
     acesskey: <ACCESS KEY>
     secretkey: <SECRET KEY>

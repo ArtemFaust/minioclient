@@ -1,0 +1,13 @@
+connections:
+#artem
+  - name: ceph-virt
+    endpoints:
+      - ceph-single
+    port: 80
+    usessl: false
+    multipartChecksSum: ChecksumCRC64NVME
+    disableMultipart: false # Если true то multipartChecksSum не учитвается - автоматически ставится ChecksumNone
+    sendMd5CheckSum: false
+    concurrentStreamParts: true
+    acesskey: 3R07JGTGAUH3A6VJG3SI
+    secretkey: t1DAKYiUxz1A53yDMz8niaoN8gEaJ39ewsEBN2jz

@@ -87,13 +87,13 @@ func makeFoooter(wm *winman.Manager, app *tview.Application,
 					var SecretAccessKey string
 					var e error
 
-					newclient, e := utils.InitClient(&selected, &Port, &AccessKeyID, &SecretAccessKey, &usessl, true)
+					newclient, connection, e := utils.InitClient(&selected, &Port, &AccessKeyID, &SecretAccessKey, &usessl, true)
 					if e != nil {
 						logger <- "Ошибка подключения к " + selected + " :" + e.Error()
 						m.SetBorderColor(tcell.ColorRed)
 					} else {
 						logger <- "Подключение к " + selected + " успешно"
-						client.UpdateClient(newclient)
+						client.UpdateClient(newclient, *connection)
 						m.SetBorderColor(tcell.ColorGreen)
 						// Обновляем список бакетов для нового клиента
 						gw.BucketList.GetRoot().(*tview.List).Clear()

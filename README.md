@@ -61,13 +61,12 @@ connections:
 
 **Список bucket'ов:**
 ```bash
-./minioclient -e <connection_name> -lb [-o table/json] [-prefix <prefix>] [-maxentry <count>] [-maxthreads <count>] [-endpoint <host>] [-port <port>]
+./minioclient -e <connection_name> -lb [-o table/json] [-prefix <prefix>] [-maxentry <count>] [-endpoint <host>] [-port <port>]
 ```
 - `-lb` – список всех bucket'ов
 - `-o` – формат вывода (json/table, по умолчанию json)
 - `-prefix` – фильтр по префиксу
 - `-maxentry` – лимит на запись (по умолчанию 1000)
-- `-maxentry, --maxthreads` – количество потоков для операции миграции (по умолчанию 1000)
 
 **Проверить существование bucket:**
 ```bash

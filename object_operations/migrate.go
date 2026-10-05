@@ -7,6 +7,7 @@ import (
 	"minioclient/global"
 	"minioclient/utils"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -62,12 +63,13 @@ func MigrateObjects(fromclient *global.GlobalClient, bucketname string, prefix s
 
 	// Создаем клиента для кластера назначения
 	toclient := global.GlobalClient{}
-	tclient, e := utils.InitClient(&toendpoint, nil, nil, nil, usessl, interactive)
+	tclient, toclientconnectionconfig, e := utils.InitClient(&toendpoint, nil, nil, nil, usessl, interactive)
 	if e != nil {
 		logrus.Error(fmt.Sprintf("Error init client for destination cluster %s", e.Error()))
 		return e
 	}
 	toclient.MinioClient = tclient
+	toclient.ClientCfg = toclientconnectionconfig
 
 	objch := make(chan minio.ObjectInfo) // Создаем канал указанного размера для записи объектов продюсеру
 	sigch := make(chan bool, maxentry)   // Создаем управляющий канал контроля горутин
@@ -202,9 +204,91 @@ func migrateObject(key string, bucketname string, fromclient *global.GlobalClien
 			return
 		}
 
+		// Если объект маленький то принудительно отключаем мультипарт загрузку для него
+		if stat.Size < 15728640 {
+			toclient.ClientCfg.DisableMultipart = true
+		}
+
+		tooptions := minio.PutObjectOptions{
+			ContentType:           "application/octet-stream",
+			NumThreads:            uint(runtime.NumCPU()),                   // Кол-во поток загрузки объекта в бакет по кол-ву CPU
+			ConcurrentStreamParts: toclient.ClientCfg.ConcurrentStreamParts, // Конкурентная загрузка
+			DisableMultipart:      toclient.ClientCfg.DisableMultipart,
+			Checksum: func() minio.ChecksumType {
+				// Если в конфиге маультипарт отключен то хешсумму не читаем
+				if toclient.ClientCfg.DisableMultipart {
+					return minio.ChecksumNone
+				}
+				// Если не указан тип хеша то используем по умолчанию ChecksumCRC64NVME
+				if toclient.ClientCfg.MultipartChecksSum == "" {
+					return minio.ChecksumCRC64NVME
+				}
+				// ChecksumCRC32|ChecksumCRC32C|ChecksumCRC64NVME|ChecksumMD5|ChecksumSHA1|ChecksumSHA256|ChecksumSHA512|ChecksumXXHASH3|ChecksumXXHASH64
+				switch toclient.ClientCfg.MultipartChecksSum {
+				case "ChecksumCRC32":
+					return minio.ChecksumCRC32
+				case "ChecksumCRC32C":
+					return minio.ChecksumCRC32
+				case "ChecksumCRC64NVME":
+					return minio.ChecksumCRC64NVME
+				case "ChecksumMD5":
+					return minio.ChecksumMD5
+				case "ChecksumSHA1":
+					return minio.ChecksumSHA1
+				case "ChecksumSHA256":
+					return minio.ChecksumSHA256
+				case "ChecksumSHA512":
+					return minio.ChecksumSHA512
+				case "ChecksumXXHASH3":
+					return minio.ChecksumXXHash3
+				case "ChecksumXXHASH64":
+					return minio.ChecksumXXHash64
+				case "ChecksumNone":
+					return minio.ChecksumNone
+				default:
+					return minio.ChecksumCRC64NVME
+				}
+			}(),
+			AutoChecksum: func() minio.ChecksumType {
+				// Если в конфиге маультипарт отключен то хешсумму не читаем
+				if toclient.ClientCfg.DisableMultipart {
+					return minio.ChecksumNone
+				}
+				// Если не указан тип хеша то используем по умолчанию ChecksumCRC64NVME
+				if toclient.ClientCfg.MultipartChecksSum == "" {
+					return minio.ChecksumCRC64NVME
+				}
+				// ChecksumCRC32|ChecksumCRC32C|ChecksumCRC64NVME|ChecksumMD5|ChecksumSHA1|ChecksumSHA256|ChecksumSHA512|ChecksumXXHASH3|ChecksumXXHASH64
+				switch toclient.ClientCfg.MultipartChecksSum {
+				case "ChecksumCRC32":
+					return minio.ChecksumCRC32
+				case "ChecksumCRC32C":
+					return minio.ChecksumCRC32
+				case "ChecksumCRC64NVME":
+					return minio.ChecksumCRC64NVME
+				case "ChecksumMD5":
+					return minio.ChecksumMD5
+				case "ChecksumSHA1":
+					return minio.ChecksumSHA1
+				case "ChecksumSHA256":
+					return minio.ChecksumSHA256
+				case "ChecksumSHA512":
+					return minio.ChecksumSHA512
+				case "ChecksumXXHASH3":
+					return minio.ChecksumXXHash3
+				case "ChecksumXXHASH64":
+					return minio.ChecksumXXHash64
+				case "ChecksumNone":
+					return minio.ChecksumNone
+				default:
+					return minio.ChecksumCRC64NVME
+				}
+			}(),
+			SendContentMd5: toclient.ClientCfg.SendMd5CheckSum,
+		}
+
 		// Записываем объект в бакет назначения
-		_, e = toclient.MinioClient.PutObject(ctx, dstbucketname, key, sourceobj, stat.Size,
-			minio.PutObjectOptions{ContentType: "application/octet-stream"})
+		putobjectstats, e := toclient.MinioClient.PutObject(ctx, dstbucketname, key, sourceobj, stat.Size, tooptions)
 		if e != nil {
 			logrus.Error(fmt.Sprintf("Error migrate object: %s Erros: %s", key, e.Error()))
 			finishreport.ErrorObjects.Add(1) // Увеличиваем счетчик обработанных с ошибкой обектов
@@ -213,7 +297,9 @@ func migrateObject(key string, bucketname string, fromclient *global.GlobalClien
 			mu.Unlock()
 			return
 		}
-		logrus.Info("Succesfule migrate object: ", key)
+
+		logrus.Info(fmt.Sprintf("Succesfule migrate object: %s Size: %d byte", key, putobjectstats.Size))
+
 		// Если передан канал отправки уведомлений
 		// записываем в него ключ объекта
 		if eventch != nil {

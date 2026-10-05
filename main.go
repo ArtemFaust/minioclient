@@ -126,12 +126,13 @@ func init() {
 
 	// Создаем клиента для подключения к кластеру
 	var e error
-	client, e := utils.InitClient(EndPoint, Port, AccessKeyID, SecretAccessKey, UseSSL, *Interactive)
+	client, connection, e := utils.InitClient(EndPoint, Port, AccessKeyID, SecretAccessKey, UseSSL, *Interactive)
 	if e != nil {
 		logrus.Error("Error init client!")
 		os.Exit(1)
 	}
 	Client.MinioClient = client
+	Client.ClientCfg = connection
 }
 
 func main() {

@@ -12,7 +12,8 @@ import (
 )
 
 // Метод инициализации клиента
-func InitClient(endpoint *string, port *string, accessKeyID *string, secretAccessKey *string, useSSL *bool, interactive bool) (*minio.Client, error) {
+func InitClient(endpoint *string, port *string, accessKeyID *string, secretAccessKey *string,
+	useSSL *bool, interactive bool) (*minio.Client, *global.Connection, error) {
 	// Снача ищем данное подключение в конфигурации
 	// Считывание конфигурационного файла
 	cfg, e := Readcfg()
@@ -29,7 +30,7 @@ func InitClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 				logrus.Error("Please provide port access key id and secret key!")
 				os.Exit(1)
 			} else {
-				return nil, e
+				return nil, nil, e
 			}
 		}
 		client, e := makeClient(endpoint, port, accessKeyID, secretAccessKey, useSSL)
@@ -38,10 +39,10 @@ func InitClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 				logrus.Error("Failed to create client!")
 				os.Exit(1)
 			} else {
-				return nil, e
+				return nil, nil, e
 			}
 		}
-		return client, nil
+		return client, nil, nil
 		// Если конфигурацию нашли и ее удалось прочитать
 	} else {
 		// Проверяем есть ли переданный endpoint в конфигурации
@@ -68,7 +69,7 @@ func InitClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 						}
 						continue
 					}
-					return client, nil
+					return client, &cfg.Connections[i], nil
 				}
 			}
 		}
@@ -81,7 +82,7 @@ func InitClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 				logrus.Error("Please provide port access key id and secret key!")
 				os.Exit(1)
 			} else {
-				return nil, e
+				return nil, nil, e
 			}
 		}
 		client, e := makeClient(endpoint, port, accessKeyID, secretAccessKey, useSSL)
@@ -90,10 +91,10 @@ func InitClient(endpoint *string, port *string, accessKeyID *string, secretAcces
 				logrus.Error("Failed to create client!")
 				os.Exit(1)
 			} else {
-				return nil, e
+				return nil, nil, e
 			}
 		}
-		return client, nil
+		return client, nil, nil
 	}
 }
 
