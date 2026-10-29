@@ -1,0 +1,683 @@
+package tui
+
+import (
+	"context"
+	customoperations "minioclient/custom_operations"
+	"minioclient/tui/migratemanager"
+
+	"minioclient/global"
+	"minioclient/utils"
+	"os"
+	"os/signal"
+	"slices"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/epiclabs-io/winman"
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+	"golang.org/x/term"
+	"gopkg.in/yaml.v2"
+)
+
+// Метод создания footer
+func makeFoooter(wm *winman.Manager, app *tview.Application,
+	client *global.GlobalClient, ctx context.Context, usessl bool, gw *global.GlobalWindows, region *string) (*winman.WindowBase, chan string) {
+
+	logger := make(chan string) // Канал записи логов
+
+	// Footer
+	footer := wm.NewWindow()   // Создание нового окна
+	footer.SetDraggable(false) // Делаем окно перемечаемым
+	footer.SetResizable(false) // Делаем окно маштабируемым
+	footer.SetBorder(false)
+	footer.SetTitleColor(tcell.Color101)
+	footer.SetBorderColor(tcell.Color101) // Цвет рамки
+	//footer.SetTitle("")     // Устанавливаем заголовок
+	footer.SetModal(false)
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	if h/5 < 10 {
+		h = 10 * 5
+	}
+	footer.SetRect(0, h, w, h/5) // Свойства окна
+	footer.Show()                // Показываем окно
+
+	// Разметка
+	grid := tview.NewGrid().
+		SetRows(8).
+		SetColumns(-2, -3).
+		SetBorders(false)
+
+	// Боксы
+	box := wm.NewWindow()
+	box.SetTitle(" Свойства подключения ")
+	box.SetBorderColor(tcell.Color101)
+	box.SetTitleColor(tcell.Color101)
+	box.AddButton(&winman.Button{
+		Symbol: '🌎',
+		OnClick: func() {
+			w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+			m := wm.NewWindow()
+			m.SetDraggable(true)
+			m.SetBorder(true)
+			m.SetRect(w/3, h/4, 40, 7)
+
+			var selected string
+			form := tview.NewForm().
+				AddDropDown("Имя подключения:", func() []string {
+					// Формируем список доступных подключений из конфигураионного файла
+					var items []string
+					cfg, _, e := utils.Readcfg()
+					if e != nil {
+						logger <- "Ошибка чтения файла конфигурации: " + e.Error()
+						return items
+					}
+					for _, connection := range cfg.Connections {
+						items = append(items, connection.Name)
+					}
+					return items
+				}(), 0, func(option string, optionIndex int) {
+					if option != "" {
+						m.SetBorderColor(tcell.ColorWhite)
+						selected = option
+					}
+				}).
+				AddButton("Подключиться", func() {
+					// Тут реализация подключения к новому выбранному подключению
+					logger <- selected
+					// Создаем клиента для подключения к кластеру
+					var Port string
+					var AccessKeyID string
+					var SecretAccessKey string
+					var e error
+
+					newclient, connection, e := utils.InitClient(&selected, &Port, &AccessKeyID, &SecretAccessKey, &usessl, true, region, false)
+					if e != nil {
+						logger <- "Ошибка подключения к " + selected + " :" + e.Error()
+						m.SetBorderColor(tcell.ColorRed)
+					} else {
+						logger <- "Подключение к " + selected + " успешно"
+						if client == nil {
+							return
+						}
+						client.UpdateClient(newclient, *connection)
+						m.SetBorderColor(tcell.ColorGreen)
+						// Обновляем список бакетов для нового клиента
+						gw.BucketList.GetRoot().(*tview.List).Clear()
+						gw.BucketList.SetRoot(getBucketList(client, wm, app, footer, logger, gw.BucketList, true))
+					}
+				}).
+				AddButton("Отмена", func() {
+					wm.RemoveWindow(m)
+				})
+
+			m.SetRoot(form)
+			m.SetTitle("Выбор подключения")
+			m.AddButton(&winman.Button{
+				Symbol:  '❌',
+				OnClick: func() { wm.RemoveWindow(m) },
+			})
+			m.AddButton(&winman.Button{
+				Symbol: '➕',
+				OnClick: func() {
+					addNewConnection(wm, app, logger)
+				},
+			})
+			m.AddButton(&winman.Button{
+				Symbol: '📝',
+				OnClick: func() {
+					_, selected := form.GetFormItem(0).(*tview.DropDown).GetCurrentOption()
+					if selected == "" || len(selected) == 0 {
+						return
+					}
+					editConnection(wm, app, logger, selected, client)
+				},
+			})
+			m.Show()
+			app.SetFocus(m)
+		},
+	})
+	box.AddButton(&winman.Button{
+		Symbol: '🤖',
+		OnClick: func() {
+			migratemanager.MakeWindow(wm, app, logger, ctx)
+		},
+	})
+	// Фоновое обновление иконки (анимация)
+	go func(ctx context.Context) {
+		elements := []rune{'🌎', '🌍', '🌏'}
+		i := 0
+		for {
+			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				box.GetButton(0).Symbol = elements[i]
+				i++
+				if i == len(elements) {
+					i = 0
+				}
+			}
+		}
+
+	}(ctx)
+
+	loglist := tview.NewList() // Логер событий
+	box1 := wm.NewWindow()
+	box1.SetTitle(" Лог операций ")
+	box1.SetBorderColor(tcell.Color101)
+	box1.SetTitleColor(tcell.Color101)
+	box1.AddButton(&winman.Button{
+		Symbol: '🧾',
+		OnClick: func() {
+			// Тут мы окрываем большое окно для просмотра событий логирования
+			if loglist.GetItemCount() == 0 {
+				return
+			}
+			w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+			m := wm.NewWindow()
+			m.SetDraggable(true)
+			m.SetBorder(true)
+			m.SetRect(w/3, h/4, w/2, h/2)
+			llist := tview.NewList()
+
+			for eventid := range loglist.GetItemCount() {
+				main, secondary := loglist.GetItemText(eventid)
+				if strings.Contains(secondary, "Ошибка") {
+					llist.AddItem(main, secondary, '🚫', nil).SetSecondaryTextColor(tcell.ColorWhite)
+					//llist.AddItem("", strings.Repeat("-", w), ' ', nil).SetSecondaryTextColor(tcell.ColorWhite)
+				} else {
+					llist.AddItem(main, secondary, '✅', nil).SetSecondaryTextColor(tcell.ColorWhite)
+					//llist.AddItem("", strings.Repeat("-", w), ' ', nil).SetSecondaryTextColor(tcell.ColorWhite)
+				}
+			}
+
+			m.SetRoot(llist)
+			m.SetTitle("Лог операций")
+			m.AddButton(&winman.Button{
+				Symbol:  '❌',
+				OnClick: func() { wm.RemoveWindow(m) },
+			})
+			m.AddButton(&winman.Button{
+				Symbol: '🔼',
+				OnClick: func() {
+					func() {
+						if m.IsMaximized() {
+							m.GetButton(1).Symbol = '🔼'
+							m.Restore()
+						} else {
+							m.GetButton(1).Symbol = '🔽'
+							m.Maximize()
+						}
+					}()
+				},
+			})
+			m.Show()
+			app.SetFocus(m)
+		},
+	})
+	// Фоновое обновление иконки (анимация)
+	go func(ctx context.Context) {
+		elements := []rune{'🧾', '📃', '📄'}
+		i := 0
+		for {
+			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				box1.GetButton(0).Symbol = elements[i]
+				i++
+				if i == len(elements) {
+					i = 0
+				}
+			}
+		}
+	}(ctx)
+
+	box1.SetRoot(loglist)
+
+	grid.AddItem(box, 0, 0, 1, 1, 0, 0, false) // колонка 0 (40%)
+	// колонка 1 - пустая (отступ)
+	grid.AddItem(box1, 0, 1, 1, 1, 0, 0, false) // колонка 2 (60%)
+	footer.SetRoot(grid)
+
+	go updatefooter(footer, ctx)                         // Запускаем в отдельном потоке процесс обновления положения footer
+	go addWorkLog(logger, loglist, ctx)                  // Запускаем в отдельном потоке процесс добавления новой записи в лог задач
+	go connectionPropertiesUpdate(box, client, app, ctx) // Запускаем в отдельном потоке процесс обновления свойств подключения
+	return footer, logger
+}
+
+// Метод обновления свойств подключения
+func connectionPropertiesUpdate(box *winman.WindowBase,
+	client *global.GlobalClient, app *tview.Application, ctx context.Context) {
+	l1 := tview.NewTextView().SetText("HOST: ")
+	host := tview.NewTextView()
+	l2 := tview.NewTextView().SetText("A KEY: ")
+	creds := tview.NewTextView()
+	l3 := tview.NewTextView().SetText("HEALTH: ")
+	health := tview.NewTextView()
+	l4 := tview.NewTextView().SetText("SERVER: ")
+	server := tview.NewTextView()
+
+	box_grid := tview.NewGrid().
+		SetRows(-2, -1, -1, -1).
+		SetColumns(0).
+		SetBorders(false).
+		AddItem(l1, 0, 0, 1, 1, 0, 0, false).
+		AddItem(host, 0, 1, 1, 4, 0, 0, false).
+		AddItem(l2, 1, 0, 1, 1, 0, 0, false).
+		AddItem(creds, 1, 1, 1, 4, 0, 0, false).
+		AddItem(l3, 2, 0, 1, 1, 0, 0, false).
+		AddItem(health, 2, 1, 1, 4, 0, 0, false).
+		AddItem(l4, 3, 0, 1, 1, 0, 0, false).
+		AddItem(server, 3, 1, 1, 4, 0, 0, false)
+
+	box.SetRoot(box_grid)
+	for {
+		time.Sleep(1 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			if client.MinioClient != nil && client.ClientCfg != nil {
+				// Свойства подключения
+				host.SetText(func() string {
+					url := client.MinioClient.EndpointURL()
+					return " " + url.Host
+				}())
+				creds.SetText(func() string {
+					creds, _ := client.MinioClient.GetCreds()
+					return " " + creds.AccessKeyID
+				}())
+				health.SetText(func() string {
+					if utils.ConnectionHealthCheck(client) {
+						return " " + "✅ OK"
+					} else {
+						return " " + "❌ ERROR"
+					}
+				}())
+				server.SetText(func() string {
+					server, e := customoperations.GetServerInfo(client, ctx)
+					if e != nil {
+						return "UNDEFINED"
+					}
+					return server
+				}())
+				app.Draw()
+			}
+		}
+		if ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+// Метод обновления footer при изменение размера окна
+func updatefooter(footer *winman.WindowBase, ctx context.Context) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGWINCH)
+
+	for range sigChan {
+		if ctx.Err() != nil {
+			break
+		}
+		w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+		if h/5 < 10 {
+			h = 10 * 5
+		}
+		footer.SetRect(0, h, w, h/5)
+	}
+}
+
+// Метод добавления новой записи в лог задач
+func addWorkLog(log <-chan string, loglist *tview.List, ctx context.Context) {
+	for l := range log {
+		if ctx.Err() != nil {
+			break
+		}
+		if strings.Contains(l, "Ошибка") {
+			loglist.AddItem(time.Now().Format("2006-01-02 15:04:05"), l, '🚫', nil).SetSecondaryTextColor(tcell.ColorGray)
+			loglist.SetCurrentItem(loglist.GetItemCount() - 1)
+		} else {
+			loglist.AddItem(time.Now().Format("2006-01-02 15:04:05"), l, '✅', nil).SetSecondaryTextColor(tcell.ColorGray)
+			loglist.SetCurrentItem(loglist.GetItemCount() - 1)
+		}
+
+	}
+}
+
+// Метод добавления нового подключения в кофигурационный фаил (вызов окна)
+func addNewConnection(wm *winman.Manager, app *tview.Application, logger chan string) {
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetBorder(true)
+	m.SetRect(w/2, h/4, 50, 25)
+
+	form := tview.NewForm()
+
+	var (
+		connectionname         string
+		endpoints              string
+		port                   string
+		multipartsum           string
+		disablemultipart       bool
+		sendmd5checksum        bool
+		concurrentstreamparts  = true
+		usessl                 = true
+		accesskey              string
+		secretkey              string
+		multipartchecksumtypes = []string{"ChecksumCRC32", "ChecksumCRC32C",
+			"ChecksumCRC64NVME", "ChecksumMD5", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512",
+			"ChecksumXXHASH3", "ChecksumXXHASH64", "ChecksumNone"}
+	)
+
+	form.AddInputField("Название подключения", connectionname, 20, nil, func(text string) {
+		m.SetBorderColor(tcell.ColorWhite)
+		if text == "" || len(text) == 0 {
+			form.GetFormItem(0).(*tview.InputField).SetBackgroundColor(tcell.ColorRed)
+		} else {
+			form.GetFormItem(0).(*tview.InputField).SetBackgroundColor(tcell.ColorGreen)
+			connectionname = text
+		}
+	})
+	form.GetFormItem(0).(*tview.InputField).SetPlaceholder("Введите название").SetPlaceholderTextColor(tcell.Color100)
+
+	form.AddInputField("Endpoints", endpoints, 20, nil, func(text string) {
+		m.SetBorderColor(tcell.ColorWhite)
+		if text == "" || len(text) == 0 || len(strings.Split(text, ",")) == 0 {
+			form.GetFormItem(1).(*tview.InputField).SetBackgroundColor(tcell.ColorRed)
+		} else {
+			form.GetFormItem(1).(*tview.InputField).SetBackgroundColor(tcell.ColorGreen)
+			endpoints = text
+		}
+	})
+	form.GetFormItem(1).(*tview.InputField).SetPlaceholder("FQDN,IP,...").SetPlaceholderTextColor(tcell.Color100)
+
+	form.AddInputField("Port", port, 4, nil, func(text string) {
+		m.SetBorderColor(tcell.ColorWhite)
+		if text == "" || len(text) == 0 {
+			form.GetFormItem(2).(*tview.InputField).SetBackgroundColor(tcell.ColorRed)
+		} else {
+			form.GetFormItem(2).(*tview.InputField).SetBackgroundColor(tcell.ColorGreen)
+			port = text
+		}
+	})
+	form.GetFormItem(2).(*tview.InputField).SetPlaceholder("443").SetPlaceholderTextColor(tcell.Color100)
+
+	form.AddDropDown("MultipartChecksSum", multipartchecksumtypes, 2, func(option string, optionIndex int) {
+		multipartsum = option
+	})
+	form.AddCheckbox("DisableMultipart", disablemultipart, func(checked bool) {
+		disablemultipart = checked
+	})
+	form.AddCheckbox("SendMd5CheckSum", sendmd5checksum, func(checked bool) {
+		sendmd5checksum = checked
+	})
+	form.AddCheckbox("ConcurrentStreamParts", concurrentstreamparts, func(checked bool) {
+		concurrentstreamparts = checked
+	})
+	form.AddCheckbox("UseSSL", usessl, func(checked bool) {
+		usessl = checked
+	})
+	form.AddInputField("Acess Key", accesskey, 20, nil, func(text string) {
+		m.SetBorderColor(tcell.ColorWhite)
+		if text == "" || len(text) == 0 {
+			form.GetFormItem(8).(*tview.InputField).SetBackgroundColor(tcell.ColorRed)
+		} else {
+			form.GetFormItem(8).(*tview.InputField).SetBackgroundColor(tcell.ColorGreen)
+			accesskey = text
+		}
+	})
+	form.AddInputField("Secret Key", secretkey, 20, nil, func(text string) {
+		m.SetBorderColor(tcell.ColorWhite)
+		if text == "" || len(text) == 0 {
+			form.GetFormItem(9).(*tview.InputField).SetBackgroundColor(tcell.ColorRed)
+		} else {
+			form.GetFormItem(9).(*tview.InputField).SetBackgroundColor(tcell.ColorGreen)
+			secretkey = text
+		}
+	})
+	form.AddButton("Создать", func() {
+		// Валидируем
+		if connectionname == "" || port == "" || endpoints == "" || accesskey == "" || secretkey == "" {
+			logger <- "Ошибка - не переданны все необходимые данные"
+			m.SetBorderColor(tcell.ColorRed)
+			return
+		}
+
+		newconnection := global.Connection{
+			Name: connectionname,
+			Endpoints: func() []string {
+				return strings.Split(endpoints, ",")
+			}(),
+			Port:                  port,
+			UseSSL:                usessl,
+			MultipartChecksSum:    multipartsum,
+			DisableMultipart:      disablemultipart,
+			SendMd5CheckSum:       sendmd5checksum,
+			ConcurrentStreamParts: concurrentstreamparts,
+			Acesskey:              accesskey,
+			Secretkey:             secretkey,
+		}
+		config, file, e := utils.Readcfg()
+		if e != nil {
+			logger <- "Ошибка чтения конфигурационного файла: " + e.Error()
+			return
+		}
+		config.Connections = append(config.Connections, newconnection)
+
+		b, e := yaml.Marshal(config)
+		if e != nil {
+			logger <- "Ошибка сериализации: " + e.Error()
+			return
+		}
+
+		e = os.WriteFile(file, b, 0755)
+		if e != nil {
+			logger <- "Ошибка сохранения конфигурации: " + e.Error()
+			return
+		}
+		logger <- "Конфигурация обновленна"
+		wm.RemoveWindow(m)
+	})
+	form.AddButton("Отмена", func() {
+		wm.RemoveWindow(m)
+	})
+
+	m.SetRoot(form)
+	m.SetTitle("Создание нового подключения")
+	m.AddButton(&winman.Button{
+		Symbol:  '❌',
+		OnClick: func() { wm.RemoveWindow(m) },
+	})
+	m.Show()
+	app.SetFocus(m)
+}
+
+// Метод редактирования выбранного подключения
+func editConnection(wm *winman.Manager, app *tview.Application, logger chan string, conname string, client *global.GlobalClient) {
+	if conname == "" || len(conname) == 0 {
+		return
+	}
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetBorder(true)
+	m.SetRect(w/2, h/4, 50, 23)
+
+	form := tview.NewForm()
+
+	// Находим свойства выбранного подключения
+	config, _, e := utils.Readcfg()
+	if e != nil {
+		logger <- "Ошибка чтения конфигурационного файла: " + e.Error()
+		return
+	}
+
+	var (
+		connectionname         string
+		endpoints              string
+		port                   string
+		multipartsum           string
+		disablemultipart       bool
+		sendmd5checksum        bool
+		concurrentstreamparts  = true
+		usessl                 = true
+		accesskey              string
+		secretkey              string
+		multipartchecksumtypes = []string{"ChecksumCRC32", "ChecksumCRC32C",
+			"ChecksumCRC64NVME", "ChecksumMD5", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512",
+			"ChecksumXXHASH3", "ChecksumXXHASH64", "ChecksumNone"}
+		selectedmultipartchecksumtype string
+	)
+
+	for _, c := range config.Connections {
+		if c.Name == conname {
+			connectionname = c.Name
+			endpoints = func() string {
+				var s string
+				if len(c.Endpoints) == 0 {
+					return s
+				}
+				for _, cc := range c.Endpoints {
+					s = s + "," + cc
+				}
+
+				return s[1:]
+			}()
+			port = c.Port
+			multipartsum = c.MultipartChecksSum
+			disablemultipart = c.DisableMultipart
+			sendmd5checksum = c.SendMd5CheckSum
+			concurrentstreamparts = c.ConcurrentStreamParts
+			usessl = c.UseSSL
+			accesskey = c.Acesskey
+			secretkey = c.Secretkey
+			selectedmultipartchecksumtype = c.MultipartChecksSum
+		}
+	}
+
+	form.AddInputField("Endpoints", endpoints, 20, nil, func(text string) {
+		m.SetBorderColor(tcell.ColorWhite)
+		if text == "" || len(text) == 0 || len(strings.Split(text, ",")) == 0 {
+			form.GetFormItem(0).(*tview.InputField).SetBackgroundColor(tcell.ColorRed)
+		} else {
+			form.GetFormItem(0).(*tview.InputField).SetBackgroundColor(tcell.ColorGreen)
+			endpoints = text
+		}
+	})
+	form.GetFormItem(0).(*tview.InputField).SetPlaceholder("FQDN,IP,...").SetPlaceholderTextColor(tcell.Color100)
+
+	form.AddInputField("Port", port, 4, nil, func(text string) {
+		m.SetBorderColor(tcell.ColorWhite)
+		if text == "" || len(text) == 0 {
+			form.GetFormItem(1).(*tview.InputField).SetBackgroundColor(tcell.ColorRed)
+		} else {
+			form.GetFormItem(1).(*tview.InputField).SetBackgroundColor(tcell.ColorGreen)
+			port = text
+		}
+	})
+	form.GetFormItem(1).(*tview.InputField).SetPlaceholder("443").SetPlaceholderTextColor(tcell.Color100)
+
+	form.AddDropDown("MultipartChecksSum", multipartchecksumtypes, slices.Index(multipartchecksumtypes, selectedmultipartchecksumtype), func(option string, optionIndex int) {
+		multipartsum = option
+	})
+	form.AddCheckbox("DisableMultipart", disablemultipart, func(checked bool) {
+		disablemultipart = checked
+	})
+	form.AddCheckbox("SendMd5CheckSum", sendmd5checksum, func(checked bool) {
+		sendmd5checksum = checked
+	})
+	form.AddCheckbox("ConcurrentStreamParts", concurrentstreamparts, func(checked bool) {
+		concurrentstreamparts = checked
+	})
+	form.AddCheckbox("UseSSL", usessl, func(checked bool) {
+		usessl = checked
+	})
+	form.AddInputField("Acess Key", accesskey, 20, nil, func(text string) {
+		m.SetBorderColor(tcell.ColorWhite)
+		if text == "" || len(text) == 0 {
+			form.GetFormItem(7).(*tview.InputField).SetBackgroundColor(tcell.ColorRed)
+		} else {
+			form.GetFormItem(7).(*tview.InputField).SetBackgroundColor(tcell.ColorGreen)
+			accesskey = text
+		}
+	})
+	form.AddInputField("Secret Key", secretkey, 20, nil, func(text string) {
+		m.SetBorderColor(tcell.ColorWhite)
+		if text == "" || len(text) == 0 {
+			form.GetFormItem(8).(*tview.InputField).SetBackgroundColor(tcell.ColorRed)
+		} else {
+			form.GetFormItem(8).(*tview.InputField).SetBackgroundColor(tcell.ColorGreen)
+			secretkey = text
+		}
+	})
+	form.AddButton("Сохранить", func() {
+		// Валидируем
+		if connectionname == "" || port == "" || endpoints == "" || accesskey == "" || secretkey == "" {
+			logger <- "Ошибка - не переданны все необходимые данные"
+			m.SetBorderColor(tcell.ColorRed)
+			return
+		}
+
+		connection := global.Connection{
+			Name: connectionname,
+			Endpoints: func() []string {
+				return strings.Split(endpoints, ",")
+			}(),
+			Port:                  port,
+			UseSSL:                usessl,
+			MultipartChecksSum:    multipartsum,
+			DisableMultipart:      disablemultipart,
+			SendMd5CheckSum:       sendmd5checksum,
+			ConcurrentStreamParts: concurrentstreamparts,
+			Acesskey:              accesskey,
+			Secretkey:             secretkey,
+		}
+		config, file, e := utils.Readcfg()
+		if e != nil {
+			logger <- "Ошибка чтения конфигурационного файла: " + e.Error()
+			return
+		}
+
+		// Заменяем параметры редактируемого подключения на новые
+		for i, c := range config.Connections {
+			if c.Name == connection.Name {
+				config.Connections[i] = connection
+			}
+		}
+
+		b, e := yaml.Marshal(config)
+		if e != nil {
+			logger <- "Ошибка сериализации: " + e.Error()
+			return
+		}
+
+		e = os.WriteFile(file, b, 0755)
+		if e != nil {
+			logger <- "Ошибка сохранения конфигурации: " + e.Error()
+			return
+		}
+		logger <- "Конфигурация обновленна"
+		wm.RemoveWindow(m)
+		if client.ClientCfg != nil && client.ClientCfg.Name != "" && client.ClientCfg.Name == conname {
+			makeInfoModal(wm, app, "Для применения изменений редактируемого подключения переподключитесь")
+		}
+	})
+	form.AddButton("Отмена", func() {
+		wm.RemoveWindow(m)
+	})
+
+	m.SetRoot(form)
+	m.SetTitle("Редактирование выбранного подключения")
+	m.AddButton(&winman.Button{
+		Symbol:  '❌',
+		OnClick: func() { wm.RemoveWindow(m) },
+	})
+	m.Show()
+	app.SetFocus(m)
+}

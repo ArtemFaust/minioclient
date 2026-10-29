@@ -1,0 +1,10 @@
+db:
+  dbtype: "sqlite|postgress"
+  sqlitedbname: "full_path/workers.db"
+  pg_db_host: "<postgres_db_host_ip_or_fqdn>"
+  pg_db_user: "<postgres_user>"
+  pg_db_password: "<postgres_password>"
+  pg_db_dbname: "<postgres_db_name>"
+  pg_db_port: "<postgres_port>"
+  pg_db_ssl: true|false
+  allow_reregister_workers: true|false

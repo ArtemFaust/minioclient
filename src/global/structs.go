@@ -1,0 +1,192 @@
+package global
+
+import (
+	"context"
+	"net/http"
+	"net/url"
+	"sync"
+	"time"
+
+	"github.com/epiclabs-io/winman"
+	"github.com/minio/minio-go/v7"
+)
+
+// Описание структуры конфигурации
+//type Cfg struct {
+//	Minioclientcfg struct {
+//		Endpoints []string `yaml:"endpoints"`
+//		Port      string   `yaml:"port"`
+//		Acesskey  string   `yaml:"acesskey"`
+//		Secretkey string   `yaml:"secretkey"`
+//	} `yaml:"minioclientcfg"`
+//}
+
+// Глобальное хранение ссылок на основные окна
+type GlobalWindows struct {
+	BucketList *winman.WindowBase
+}
+
+// Структура клиента
+type GlobalClient struct {
+	MinioClient *minio.Client // Сам клиент
+	Mu          sync.Mutex    // Мутикс для блокировки дсотупа к клиенту
+	ClientCfg   *Connection   // Конфигурация клиента
+}
+
+func (c *GlobalClient) MakePresignUrlForBucketOperation(ctx context.Context, bucketname string, objectname string, additionalparams url.Values) (*url.URL, error) {
+	u, e := c.MinioClient.Presign(ctx, http.MethodHead, bucketname, objectname, 5*time.Minute, additionalparams)
+	return u, e
+}
+
+// Метод обновления клиента
+func (gc *GlobalClient) UpdateClient(newclient *minio.Client, connection Connection) {
+	gc.Mu.Lock()
+	gc.MinioClient = newclient
+	gc.ClientCfg = &connection
+	gc.Mu.Unlock()
+}
+
+type Cfg struct {
+	Connections []Connection `yaml:"connections"`
+}
+
+type Connection struct {
+	Name                  string   `yaml:"name"`
+	Endpoints             []string `yaml:"endpoints"`
+	Port                  string   `yaml:"port"`
+	Region                string   `yaml:"region"`
+	UseSSL                bool     `yaml:"usessl"`
+	MultipartChecksSum    string   `yaml:"multipartChecksSum"`
+	DisableMultipart      bool     `yaml:"disableMultipart"`
+	SendMd5CheckSum       bool     `yaml:"sendMd5CheckSum"`
+	ConcurrentStreamParts bool     `yaml:"concurrentStreamParts"`
+	Acesskey              string   `yaml:"acesskey"`
+	Secretkey             string   `yaml:"secretkey"`
+}
+
+// Конфигурация подключения к БД
+type DBConfig struct {
+	Db Dconfig `yaml:"db"`
+}
+
+// Конфигурация подключения к БД
+type Dconfig struct {
+	Dbtype                   string `yaml:"dbtype" json:"dbtype"`
+	Sqlitedbname             string `yaml:"sqlitedbname" json:"sqlitedbname"`
+	Pg_db_host               string `yaml:"pg_db_host" json:"pg_db_host"`
+	Pg_db_user               string `yaml:"pg_db_user" json:"pg_db_user"`
+	Pg_db_password           string `yaml:"pg_db_password" json:"pg_db_password"`
+	Pg_db_dbname             string `yaml:"pg_db_dbname" json:"pg_db_dbname"`
+	Pg_db_port               string `yaml:"pg_db_port" json:"pg_db_port"`
+	Pg_db_ssl                bool   `yaml:"pg_db_ssl" json:"pg_db_ssl"`
+	Allow_Rerigister_Workers bool   `yaml:"allow_reregister_workers" json:"allow_reregister_workers"`
+}
+
+// Структура обхекта бакета
+type BucketObject struct {
+	Etag         string      `json:"etag"`
+	Name         string      `json:"name"`
+	LastModified time.Time   `json:"lastModified"`
+	Size         int         `json:"size"`
+	ContentType  string      `json:"contentType"`
+	Expires      time.Time   `json:"expires"`
+	Metadata     interface{} `json:"metadata"`
+	UserTagCount int         `json:"UserTagCount"`
+	Owner        struct {
+		Owner struct {
+			Space string `json:"Space"`
+			Local string `json:"Local"`
+		} `json:"owner"`
+		Name string `json:"name"`
+		ID   string `json:"id"`
+	} `json:"Owner"`
+	Grant             interface{} `json:"Grant"`
+	StorageClass      string      `json:"storageClass"`
+	IsLatest          bool        `json:"IsLatest"`
+	IsDeleteMarker    bool        `json:"IsDeleteMarker"`
+	VersionID         string      `json:"VersionID"`
+	ReplicationStatus string      `json:"ReplicationStatus"`
+	ReplicationReady  bool        `json:"ReplicationReady"`
+	Expiration        time.Time   `json:"Expiration"`
+	ExpirationRuleID  string      `json:"ExpirationRuleID"`
+	NumVersions       int         `json:"NumVersions"`
+	Restore           interface{} `json:"Restore"`
+	ChecksumCRC32     string      `json:"ChecksumCRC32"`
+	ChecksumCRC32C    string      `json:"ChecksumCRC32C"`
+	ChecksumSHA1      string      `json:"ChecksumSHA1"`
+	ChecksumSHA256    string      `json:"ChecksumSHA256"`
+	ChecksumCRC64NVME string      `json:"ChecksumCRC64NVME"`
+	ChecksumMode      string      `json:"ChecksumMode"`
+	Internal          interface{} `json:"Internal"`
+}
+
+// Структура статистики бакета
+type BucketStats struct {
+	Bucket            string            `json:"bucket"`
+	Tenant            string            `json:"tenant"`
+	Versioning        string            `json:"versioning"`
+	Zonegroup         string            `json:"zonegroup"`
+	PlacementRule     string            `json:"placement_rule"`
+	ExplicitPlacement ExplicitPlacement `json:"explicit_placement"`
+	ID                string            `json:"id"`
+	Marker            string            `json:"marker"`
+	IndexType         string            `json:"index_type"`
+	IndexGeneration   int64             `json:"index_generation"`
+	NumShards         int64             `json:"num_shards"`
+	ObjectLockEnabled bool              `json:"object_lock_enabled"`
+	MfaEnabled        bool              `json:"mfa_enabled"`
+	Owner             string            `json:"owner"`
+	Ver               string            `json:"ver"`
+	MasterVer         string            `json:"master_ver"`
+	Mtime             string            `json:"mtime"`
+	CreationTime      string            `json:"creation_time"`
+	MaxMarker         string            `json:"max_marker"`
+	Usage             Usage             `json:"usage"`
+	BucketQuota       BucketQuota       `json:"bucket_quota"`
+}
+
+type BucketQuota struct {
+	Enabled    bool  `json:"enabled"`
+	CheckOnRaw bool  `json:"check_on_raw"`
+	MaxSize    int64 `json:"max_size"`
+	MaxSizeKB  int64 `json:"max_size_kb"`
+	MaxObjects int64 `json:"max_objects"`
+}
+
+type ExplicitPlacement struct {
+	DataPool      string `json:"data_pool"`
+	DataExtraPool string `json:"data_extra_pool"`
+	IndexPool     string `json:"index_pool"`
+}
+
+type Usage struct {
+	RgwMain RgwMain `json:"rgw.main"`
+}
+
+type RgwMain struct {
+	Size           int64 `json:"size"`
+	SizeActual     int64 `json:"size_actual"`
+	SizeUtilized   int64 `json:"size_utilized"`
+	SizeKB         int64 `json:"size_kb"`
+	SizeKBActual   int64 `json:"size_kb_actual"`
+	SizeKBUtilized int64 `json:"size_kb_utilized"`
+	NumObjects     int64 `json:"num_objects"`
+}
+
+// Описание структуры объекта OLH индексной записи
+type OlhObjectIndexRecord struct {
+	Entry struct {
+		DeleteMarker bool `json:"delete_marker"`
+		Epoch        int  `json:"epoch"`
+		Exists       bool `json:"exists"`
+		Key          struct {
+			Instance string `json:"instance"`
+			Name     string `json:"name"`
+		} `json:"key"`
+		PendingLog     []interface{} `json:"pending_log"`
+		PendingRemoval bool          `json:"pending_removal"`
+		Tag            string        `json:"tag"`
+	} `json:"entry"`
+	Idx  string `json:"idx"`
+	Type string `json:"type"`
+}

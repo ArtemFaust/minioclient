@@ -1,0 +1,10 @@
+db:
+  dbtype: "postgress"
+  sqlitedbname: "/Users/artem/Downloads/db/workers.db"
+  pg_db_host: "192.168.1.213"
+  pg_db_user: "test"
+  pg_db_password: "test"
+  pg_db_dbname: "test"
+  pg_db_port: "5432"
+  pg_db_ssl: false
+  allow_reregister_workers: true

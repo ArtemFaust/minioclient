@@ -21,7 +21,7 @@ CLI клиент для управления объектным S3 совмес�
 ## Установка
 
 ```bash
-go build -o minioclient .
+./build.sh
 ```
 
 ## Использование
@@ -221,6 +221,7 @@ connections:
 connections:
   - name: localdev
     port: "9000"
+    region: ""
     accesskey: "minioadmin"
     secretkey: "minioadmin"
     ssl: false
@@ -230,6 +231,7 @@ connections:
 
   - name: production_minio
     port: "9000"
+    region: ""
     accesskey: "${MINIO_ACCESS_KEY}"
     secretkey: "${MINIO_SECRET_KEY}"
     ssl: true
@@ -239,6 +241,7 @@ connections:
 
   - name: cephrgw
     port: "8080"
+    region: ""
     accesskey: "rgw-admin"
     secretkey: "${RGW_SECRET_KEY}"
     ssl: false
@@ -275,9 +278,9 @@ connections:
 
 ### Миграция бакета из одного кластера в другой или в рамках одного кластера но в другой бакет:
 ```bash
-./minioclient -e <source cluster from cfg> -ssl=false -migrate -destination <dst cluster from cfg> -bn <source bucket> [-dbn <dst bucket>] [-d] [-maxentry <threads count>]
+./minioclient -e <source cluster from cfg> -ssl=false -migrate -destination <dst cluster from cfg> -bn <source bucket> [-dbn <dst bucket>] [-d] [-maxentry <batch threads count>] [-prefix <prefix for list and migrate source objects>]
 ```
-Данная операция позволяет произвести миграцию объектов бакета в другой кластер или в тот же клстер но в другой бакет. Если не указан destination bucket - значит будет создан бакет с названием source bucket Каждый объект бакета обрабатывается в отдельном потоке исполнения операции миграции. Ключем maxentry можно указать сколько таких потов будет выполнятся одновременно (сколько объектов бакета будет мигрировать одновременно). По умолчанию 1000
+Данная операция позволяет произвести миграцию объектов бакета в другой кластер или в тот же клстер но в другой бакет. Если не указан destination bucket - значит будет создан бакет с названием source bucket Каждый объект бакета обрабатывается в отдельном потоке исполнения операции миграции. Ключем maxentry можно указать сколько таких потов будет выполнятся одновременно (сколько объектов бакета будет мигрировать одновременно). По умолчанию 1000 батчей - объектов в одном батче 1000
 
 Дополнительные комбинации клавиш
 - Ctrl+D - переключть режим логирования (включить или выключить подробный лог)
@@ -350,6 +353,90 @@ minioclient -e localdev -gos -bn mybucket -key myfile.txt -vid version123
 
 # Удаление с forced режимом и dry-run
 minioclient -e localdev -ro -bn mybucket -key old.txt -dryrun -f
+```
+
+## Режим работы master-slave
+В данном редиме работы мастер (master) может отдавать задачи многим подчиненным (slave) воркерам
+## Термины и описание взаимодействия master-slave gRPC
+**master** - Управляющий узел инициатор создания и назначения задач.
+**slave workers** - Подчиненные узлы исполнители задач.
+
+**master**
+- Мастер запускает gRPC сервис 
+- Мастер регистрирует slave workers по запросу от worker
+- Мастер создает задачи 
+- Мастер отдает задачи воркерам по запросу от воркеров с учетом приоритета и времени ожидания задачи в пуле задач для воркера
+- Мастер обновляет статусы задач по полученной информации от воркеров
+**slave workers**
+- Подключатся к мастеру с передачей основной информации о себе 
+- Запрашивают задачу 
+- Выполняет задачу 
+- Переодически обновляет (отсылает мастеру) информацию о себе
+- Переодически обновляет (отсылает мастеру) о статусе выполняемой задачи
+
+Простой пример:
+- Воркер подключается к мастеру (ClientHello)
+- Мастер регистрирует воркера если он соответсвует всем условим 
+- Если регистрация воркера прошла успешно
+  - Воркер переодически отсылает информацию о себе (ClientHello)
+  - Воркер запрашивает списко задач
+    - Воркер получает наиболее приоритетную задачу
+    - Воркер приступает к выполнению задачи
+    - Воркер переодически отсылает информацию о статусе задачи (UpdateMigrateStatusRequest)
+- Мастер обновляет информацию о воркере и статусе выполняемой им задачи
+
+
+## Описание работы с контейнерами
+Контейнер с клиентом необходим для запуска slave worker выполнения задач миграции
+
+### Сборка контейнера для запуска воркера
+Скрипт сборки проекта соберет бинарники и контейнеры под amd64 и arm64
+```bash
+./build.sh
+```
+
+### Запуск мастера из контейнера
+1. Подготовка конфигурационного файла dbconfig.yaml
+```yaml
+db:
+  dbtype: "sqlite"
+  sqlitedbname: "./db/workers.db"
+  pg_db_host: ""
+  pg_db_user: ""
+  pg_db_password: ""
+  pg_db_dbname: ""
+  pg_db_port: ""
+  pg_db_ssl: ""
+  allow_reregister_workers: true
+```
+Лучше использовать Postgress
+```yaml
+db:
+  dbtype: "postgress"
+  sqlitedbname: "./db/workers.db"
+  pg_db_host: "192.168.1.213"
+  pg_db_user: "test"
+  pg_db_password: "test"
+  pg_db_dbname: "test"
+  pg_db_port: "5432"
+  pg_db_ssl: false
+  allow_reregister_workers: true
+```
+2. Создание директории db
+```bash
+mkdir $(pwd)/db
+```
+3. Запуск мастера
+```bash
+docker run -ti --rm --env MASTER=true --env DEBUG=true --env MASTERPORT=8080 \
+[-v $(pwd)/db:/home/minioclient/db \]
+-v $(pwd)/dbconfig.yaml:/home/minioclient/.config/dbconfig.yaml \
+-p 8080:8080  minioclient::[arm64|amd64]
+```
+
+### Запуск воркера из контейнера
+```bash
+docker run -ti --rm --env SLAVE=true --env DEBUG=true --env MASTERENDPOINT=192.168.1.102:8080  minioclient:[arm64|amd64]
 ```
 
 ## Лицензия

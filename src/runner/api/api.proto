@@ -1,0 +1,93 @@
+syntax = "proto3";
+option go_package = "./api";
+package runner;
+ 
+/*
+    Описание сервиса RPC
+    Сервис имеет вызываемый метод SayIt который принимает структуру Request и возвращает структуру Response
+*/
+service Master {
+    rpc ClientHello (ClientHelloRequest) returns (ClientHelloResponse); // Вызов установления соединения и обновления статуса воркера
+    rpc GetTasks (GetTaskRequest) returns (GetTaskResponse); // Вызов запроса задач для woker
+    rpc UpdateMigrateTaskStatus (UpdateMigrateStatusRequest) returns (UpdateMigrateStatusResponse); // Обновления статуса задачи миграции
+}
+ 
+/*
+    Описание структур с которыми будет работать сервер RPC
+*/
+ 
+// Структуры верхнего порядка
+
+// Структура описания статуса задачи
+message TaskStatus {
+    uint64 Id = 1;              // ID задачи
+    string Status = 2;          // Статус задачи in-progress|done|error
+    string StatusDetailed = 3;  // Дополнительная информация
+} 
+
+// Структура описания статуса миграции миграции
+message MigrateReport {
+	uint64 TotalObjects = 1;    // Счетчик всех обработанных объектов
+	uint64 ErrorObjects = 2;    // Счетчик обработанных объектов с ошибкой
+	uint64 DoneObjects  = 3;    // Счетчик обработанных объектов без ошибки
+	repeated string Errors = 4; // Список ошибок
+}
+
+
+// Структуры запросов и ответов
+
+// Структура описывающая запрос к сервису RPC на установление соединения с мастером.
+// Slave передает свои основные характеристики при установлении соединения
+// Так же передеает информацию об своем статусе занятости id задачи которую выполняет и статус задачи
+message ClientHelloRequest {
+    string Uuid = 1;            // UUID узла вычисляемый из основных характеристик (mac + hostname)
+    string HostName = 2;        // Имя slave узла
+    string MacAddress = 3;      // Mac adress slave узла
+    string IpAddress = 4;       // IP adress slave узла
+    string OsType = 5;          // Тип операционной системы
+    uint64 MemTotal = 6;         // Объем дсотупной оперативной памяти в байтах
+    int32 CpuCount = 7;         // Количество ядер cpu
+    bool Status = 8;            // Статус занятости worker
+    uint64 TaskId = 9;          // ID выполняемой задачи
+    string TaskStatus = 10;     // Статус выполняемой задачи
+}
+ 
+// Структура описывающая ответ от сервера RPC на установление соединения с мастером.
+// Мастер возвращает ответ с подтверждением установления соединения
+message ClientHelloResponse {
+    string Status = 1;          // Статус принятия или отклонения соединения со стороны master "allow|deny"
+    string StatusDetailed = 2; // Детальный ответ по статусу может содержать дополнительную информацию
+}
+
+// Структура описывающая запрос к сервису RPC на получение задачи.
+// Slave передает свой uuid
+message GetTaskRequest {
+    string Uuid = 1; // UUID узла вычисляемый из основных характеристик (mac + hostname). Необходим для определения запрашивающего
+}
+
+// Структура описывающая ответ от сервера RPC на запрос доступных задач для воркера
+message GetTaskResponse {
+    string Uuid = 1;                // UUID узла вычисляемый из основных характеристик (mac + hostname). Необходим для валидации со стороны воркера что задача предназначена ему
+    int32 Priority = 2;             // Приоритет задачи
+    bytes  Task = 3;                // JSON объект описания задачи в сыром массиве байт
+    string CreateAt = 4;            // Время создания задачи
+    bool Error = 5;                 // Состояние ошибки запроса
+    string AdditionalMessage = 6;   // Дополнительное сообщение 
+    string Status = 7;              // Статус задачи
+    uint64 Id = 8;                   // ID задачи
+}
+
+// Структура описывающая запрос на обновление статуса миграции
+message UpdateMigrateStatusRequest {
+    string Uuid = 1;            // UUID воркера для проверки на строне master
+    uint64 TaskId = 2;          // ID выполняемой задачи
+    TaskStatus TaskStatus = 3;
+    MigrateReport MigrateReport = 4;
+}
+
+// Структура ответа на запрос обновлениястатуса миграции
+message UpdateMigrateStatusResponse {
+    string Uuid = 1;                // UUID воркера для проверки на стороне воркера
+    bool UpdateStatus = 2;          // Результат успешности выполнения задачи обновления статуса задачи 
+    string AdditionalMessage = 3;   // Дополнительное сообчение
+}
