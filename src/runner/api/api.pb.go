@@ -88,7 +88,8 @@ type MigrateReport struct {
 	TotalObjects  uint64                 `protobuf:"varint,1,opt,name=TotalObjects,proto3" json:"TotalObjects,omitempty"` // Счетчик всех обработанных объектов
 	ErrorObjects  uint64                 `protobuf:"varint,2,opt,name=ErrorObjects,proto3" json:"ErrorObjects,omitempty"` // Счетчик обработанных объектов с ошибкой
 	DoneObjects   uint64                 `protobuf:"varint,3,opt,name=DoneObjects,proto3" json:"DoneObjects,omitempty"`   // Счетчик обработанных объектов без ошибки
-	Errors        []string               `protobuf:"bytes,4,rep,name=Errors,proto3" json:"Errors,omitempty"`              // Список ошибок
+	Difference    uint64                 `protobuf:"varint,4,opt,name=Difference,proto3" json:"Difference,omitempty"`     // Счетчик разници операций над объектами накопленный за время миграции полученный через bucket notification
+	Errors        []string               `protobuf:"bytes,5,rep,name=Errors,proto3" json:"Errors,omitempty"`              // Список ошибок
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -140,6 +141,13 @@ func (x *MigrateReport) GetErrorObjects() uint64 {
 func (x *MigrateReport) GetDoneObjects() uint64 {
 	if x != nil {
 		return x.DoneObjects
+	}
+	return 0
+}
+
+func (x *MigrateReport) GetDifference() uint64 {
+	if x != nil {
+		return x.Difference
 	}
 	return 0
 }
@@ -610,12 +618,15 @@ const file_api_api_proto_rawDesc = "" +
 	"TaskStatus\x12\x0e\n" +
 	"\x02Id\x18\x01 \x01(\x04R\x02Id\x12\x16\n" +
 	"\x06Status\x18\x02 \x01(\tR\x06Status\x12&\n" +
-	"\x0eStatusDetailed\x18\x03 \x01(\tR\x0eStatusDetailed\"\x91\x01\n" +
+	"\x0eStatusDetailed\x18\x03 \x01(\tR\x0eStatusDetailed\"\xb1\x01\n" +
 	"\rMigrateReport\x12\"\n" +
 	"\fTotalObjects\x18\x01 \x01(\x04R\fTotalObjects\x12\"\n" +
 	"\fErrorObjects\x18\x02 \x01(\x04R\fErrorObjects\x12 \n" +
-	"\vDoneObjects\x18\x03 \x01(\x04R\vDoneObjects\x12\x16\n" +
-	"\x06Errors\x18\x04 \x03(\tR\x06Errors\"\xa2\x02\n" +
+	"\vDoneObjects\x18\x03 \x01(\x04R\vDoneObjects\x12\x1e\n" +
+	"\n" +
+	"Difference\x18\x04 \x01(\x04R\n" +
+	"Difference\x12\x16\n" +
+	"\x06Errors\x18\x05 \x03(\tR\x06Errors\"\xa2\x02\n" +
 	"\x12ClientHelloRequest\x12\x12\n" +
 	"\x04Uuid\x18\x01 \x01(\tR\x04Uuid\x12\x1a\n" +
 	"\bHostName\x18\x02 \x01(\tR\bHostName\x12\x1e\n" +

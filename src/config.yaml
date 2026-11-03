@@ -1,27 +1,25 @@
 Connections:
-- Acesskey: 3R07JGTGAUH3A6VJG3SI
+- Acesskey: FF8OZYCO6C4095B3XGF7
   ConcurrentStreamParts: true
   DisableMultipart: true
   Endpoints:
-  - 172.16.41.129
-  - ceph-single
+  - 192.168.1.187
   MultipartChecksSum: ChecksumCRC64NVME
-  Name: ceph-virt
+  Name: ceph-single01
   Port: "80"
-  Region: ms-group01
-  Secretkey: t1DAKYiUxz1A53yDMz8niaoN8gEaJ39ewsEBN2jz
+  Region: default
+  Secretkey: vzLPfDGSGKZSx0gXR94iKcubf8V5tqdsjU9qy1oS
   SendMd5CheckSum: false
   UseSSL: false
-- Acesskey: 3R07JGTGAUH3A6VJG3SI
+- Acesskey: FF8OZYCO6C4095B3XGF7
   ConcurrentStreamParts: true
   DisableMultipart: true
   Endpoints:
-  - 172.16.41.129
-  - ceph-single
+  - 192.168.1.187
   MultipartChecksSum: ChecksumCRC64NVME
-  Name: ceph-virt
+  Name: ceph-single01
   Port: "80"
-  Region: ms-group01
-  Secretkey: t1DAKYiUxz1A53yDMz8niaoN8gEaJ39ewsEBN2jz
+  Region: default
+  Secretkey: vzLPfDGSGKZSx0gXR94iKcubf8V5tqdsjU9qy1oS
   SendMd5CheckSum: false
   UseSSL: false

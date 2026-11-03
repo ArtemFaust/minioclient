@@ -5,6 +5,8 @@ ENV SLAVE="false"
 ENV DEBUG="false"
 ENV MASTERENDPOINT="localhost:8080"
 ENV MASTERPORT="8080"
+ENV HTTP_PORT="8080"
+ENV HOST_RUNNER=""
 RUN apt update && apt upgrade -y && apt install bash
 RUN groupadd -r minioclient && useradd -r -g minioclient minioclient
 COPY ./ /home/minioclient

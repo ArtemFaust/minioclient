@@ -6,6 +6,7 @@ import (
 	"minioclient/runner/db"
 	"minioclient/utils"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,8 @@ func getAllTaskList(wm *winman.Manager, app *tview.Application, logger chan stri
 	// Примитив для вызова контекстного меню по нажатию enter
 	table.SetSelectedFunc(func(row, column int) {
 		cell := table.GetCell(row, column)
+		uuid := table.GetCell(row, 1).Text
+
 		switch {
 		case column == 0:
 			taskid := func() uint {
@@ -60,7 +63,7 @@ func getAllTaskList(wm *winman.Manager, app *tview.Application, logger chan stri
 				}
 				return uint(i)
 			}()
-			showListTaskStatusContext(wm, app, cell, logger, taskid, table, d)
+			showListTaskStatusContext(wm, app, cell, logger, taskid, uuid, table, d)
 		default:
 			return
 		}
@@ -93,11 +96,17 @@ func makeTaskListTable(wm *winman.Manager, app *tview.Application, table *tview.
 		table.SetCell(0, i, tview.NewTableCell(cell).SetTextColor(tcell.ColorYellow).SetAlign(tview.AlignCenter))
 	}
 
+	// сортируем список объектов (что бы не пригал)
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].ID < tasks[j].ID
+	})
+
 	for x, task := range tasks {
 		table.SetCell(x+1, 0,
 			tview.NewTableCell("🖱️ "+strconv.Itoa(int(task.ID))).
 				SetClickedFunc(func() bool {
 					cell := table.GetCell(x+1, 0)
+					uuid := table.GetCell(x+1, 1).Text
 					if cell.Text == "" || len(strings.Split(cell.Text, " ")) == 0 {
 						logger <- "Ошибка определения ID задачи: " + e.Error()
 						return true
@@ -108,7 +117,7 @@ func makeTaskListTable(wm *winman.Manager, app *tview.Application, table *tview.
 						logger <- "Ошибка определения ID задачи: " + e.Error()
 						return true
 					}
-					showListTaskStatusContext(wm, app, cell, logger, uint(i), table, d)
+					showListTaskStatusContext(wm, app, cell, logger, uint(i), uuid, table, d)
 					return true
 				}).
 				SetTextColor(tcell.ColorYellow).
@@ -170,32 +179,41 @@ func addNewTask(d *gorm.DB, logger chan string, task *db.Task) error {
 		return e
 	}
 
-	// Получение парамтеров подключения from
+	// Приводим тип один раз в самом начале, чтобы избежать паники и дублирования
+	migrateTask, ok := task.WorkerTask.(*db.WorkerMigrateTask)
+	if !ok {
+		logger <- "Ошибка: задача не является типом *db.WorkerMigrateTask"
+		return errors.New("неверный тип задачи миграции")
+	}
+
+	// Флаги для проверки, нашли ли мы нужные подключения
+	var fromFound, toFound bool
+
+	// Ищем оба подключения за ОДИН проход по циклу (повышает производительность)
 	for _, c := range config.Connections {
-		if c.Name == task.WorkerTask.(*db.WorkerMigrateTask).From.Name {
-			if migrateTask, ok := task.WorkerTask.(*db.WorkerMigrateTask); ok {
-				migrateTask.From = c
-				logger <- "Данные подключения источника миграции извлечены"
-				break
-			}
-			logger <- "Ошибка извлечения указателя на структуру"
+		if !fromFound && c.Name == migrateTask.From.Name {
+			migrateTask.From = c
+			logger <- "Данные подключения источника миграции извлечены"
+			fromFound = true
+		}
+		if !toFound && c.Name == migrateTask.To.Name {
+			migrateTask.To = c
+			logger <- "Данные подключения назначения миграции извлечены"
+			toFound = true
+		}
+		// Если всё нашли, можно выходить из цикла раньше времени
+		if fromFound && toFound {
 			break
 		}
+	}
+
+	// Проверяем результаты поиска после завершения цикла
+	if !fromFound {
 		logger <- "Ошибка извлечения данных подключения источника"
 		return errors.New("Ошибка извлечения данных подключения источника")
 	}
 
-	// Получение парамтеров подключения to
-	for _, c := range config.Connections {
-		if c.Name == task.WorkerTask.(*db.WorkerMigrateTask).To.Name {
-			if migrateTask, ok := task.WorkerTask.(*db.WorkerMigrateTask); ok {
-				migrateTask.To = c
-				logger <- "Данные подключения назначения миграции извлечены"
-				break
-			}
-			logger <- "Ошибка извлечения указателя на структуру"
-			break
-		}
+	if !toFound {
 		logger <- "Ошибка извлечения данных подключения назначения"
 		return errors.New("Ошибка извлечения данных подключения назначения")
 	}
@@ -239,14 +257,14 @@ func removeTaskFromQueue(wm *winman.Manager, app *tview.Application, taskid uint
 
 // Метод отображения контекстного меню задачи при нажатии на статус задачи
 func showListTaskStatusContext(wm *winman.Manager, app *tview.Application, cell *tview.TableCell,
-	logger chan string, taskid uint, table *tview.Table, d *gorm.DB) {
+	logger chan string, taskid uint, uuid string, table *tview.Table, d *gorm.DB) {
 	x, y, _ := cell.GetLastPosition()
 	//w, _, _ := term.GetSize(int(os.Stdout.Fd()))
 	m := wm.NewWindow()
 	m.SetDraggable(false)
 	m.SetBorder(true)
 	m.SetResizable(false)
-	m.SetRect(x, y, 25, 12)
+	m.SetRect(x, y, 25, 14)
 
 	list := tview.NewList()
 	list.AddItem("Свойства задачи", "", ' ', func() {
@@ -254,6 +272,10 @@ func showListTaskStatusContext(wm *winman.Manager, app *tview.Application, cell 
 		if e != nil {
 			logger <- "Ошибка получения свойств задачи: " + e.Error()
 		}
+		wm.RemoveWindow(m)
+	})
+	list.AddItem("Отчет выполнения", "", ' ', func() {
+		showTaskMigrateReport(wm, app, uuid, taskid, logger, d)
 		wm.RemoveWindow(m)
 	})
 	list.AddItem("Переназначить", "", ' ', func() {
@@ -278,7 +300,7 @@ func showListTaskStatusContext(wm *winman.Manager, app *tview.Application, cell 
 		wm.RemoveWindow(m)
 	})
 	list.AddItem("Закрыть меню", "", ' ', func() { wm.RemoveWindow(m) })
-	list.SetCurrentItem(-1)
+	list.SetCurrentItem(0)
 
 	m.SetRoot(list)
 	m.SetTitle(" меню задачи ")

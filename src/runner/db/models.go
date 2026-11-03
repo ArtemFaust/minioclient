@@ -320,11 +320,12 @@ func (task *Task) RemoveTask(db *gorm.DB) error {
 // Структура описания отчета MigrateReport
 type MigrateReport struct {
 	ID           uint     `gorm:"primaryKey;"`
-	Uuid         string   `gorm:"not null;type:uuid;uniqueIndex" json:"Uuid"`                    // UUID воркера
+	Uuid         string   `gorm:"not null;type:uuid;" json:"Uuid"`                               // UUID воркера
 	TaskID       uint     `gorm:"not null;type:integer" json:"TaskID"`                           // ID задачи
 	TotalObjects uint     `gorm:"not null;type:integer" json:"TotalObjects"`                     // Обчее количество обработанных объектов
 	ErrorObjects uint     `gorm:"not null;type:integer" json:"ErrorObjects"`                     // Кол-во объектов обработанных с ошибкой
 	DoneObjects  uint     `gorm:"not null;type:integer" json:"DoneObjects"`                      // Кол-во успешно мигрированных объектов
+	Difference   uint     `gorm:"not null;type:integer" json:"Difference"`                       // Счетчик накопленных изменений в бакете с начала миграции
 	Errors       []string `gorm:"serializer:json;not null;type:json;default:'[]'" json:"Errors"` // Массив ключей объектов миграция которых закончилась с ошибкой
 }
 
@@ -336,12 +337,13 @@ func (report *MigrateReport) CreateOrUpdateMigrateReport(db *gorm.DB) error {
 	}
 	// Пытаемся обновить существующую запись
 	result := db.Model(&MigrateReport{}).
-		Where("uuid = ?", report.Uuid).
+		Where("uuid = ? AND task_id = ?", report.Uuid, report.TaskID).
 		Updates(map[string]interface{}{
 			"task_id":       report.TaskID,
 			"total_objects": report.TotalObjects,
 			"error_objects": report.ErrorObjects,
 			"done_objects":  report.DoneObjects,
+			"difference":    report.Difference,
 			"errors":        errorsJSON,
 		})
 
@@ -355,4 +357,14 @@ func (report *MigrateReport) CreateOrUpdateMigrateReport(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+// Метод получения отчета
+func (report *MigrateReport) GetMigrateReport(db *gorm.DB) (MigrateReport, error) {
+	r := MigrateReport{}
+	e := db.Where("uuid = ? AND task_id = ?", report.Uuid, report.TaskID).First(&r).Error
+	if e != nil {
+		return r, e
+	}
+	return r, nil
 }

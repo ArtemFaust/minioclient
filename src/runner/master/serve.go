@@ -42,7 +42,7 @@ func MasterServe(port string, d *gorm.DB, dbcfg *global.DBConfig) {
 			case <-ctx.Done():
 				return
 			case <-tick:
-				utils.PrintStats()
+				utils.PrintStats(nil)
 			}
 		}
 	}()

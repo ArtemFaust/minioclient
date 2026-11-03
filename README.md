@@ -389,6 +389,15 @@ minioclient -e localdev -ro -bn mybucket -key old.txt -dryrun -f
 ## Описание работы с контейнерами
 Контейнер с клиентом необходим для запуска slave worker выполнения задач миграции
 
+>ENV переменные
+- **ENV MASTER="false"** Переключатель запуска в режиме мастер
+- **ENV SLAVE="false"** Переключатель запуска в режиме воркера
+- **ENV DEBUG="false"** Переключатель подробного логирования
+- **ENV MASTERENDPOINT="localhost"** Указатель на мастера для подключения воркерами
+- **ENV MASTERPORT="8080"**  Указатель на порт мастера
+- **ENV HTTP_PORT="8080"** Указатель порта запуска сервиса приема нотификаций от бакета
+- **ENV HOST_RUNNER="IP or FQDN"** Указатель на FQDN или IP узла запуска контейнера (хоста на котром запускаются контейнеры) для создания топика нотифкации с указанием точки подключения
+
 ### Сборка контейнера для запуска воркера
 Скрипт сборки проекта соберет бинарники и контейнеры под amd64 и arm64
 ```bash
@@ -435,8 +444,45 @@ docker run -ti --rm --env MASTER=true --env DEBUG=true --env MASTERPORT=8080 \
 ```
 
 ### Запуск воркера из контейнера
+HTTP_PORT - Это порт на котором будет весеть сервис http с обработчиком поступающих событий
+нотификации от бакета - если выполняется проброс порта лучше что бы он соответсвовал внутреннему порту
+так как данный порт используется при генерации топика нотификации
 ```bash
-docker run -ti --rm --env SLAVE=true --env DEBUG=true --env MASTERENDPOINT=192.168.1.102:8080  minioclient:[arm64|amd64]
+docker run -ti --rm --env SLAVE=true --env DEBUG=true \
+--env MASTERENDPOINT=192.168.1.102:8080 --env HTTP_PORT=8081 -p 8081:8081 \
+-m 4G \
+--cpus="2" \
+minioclient:[arm64|amd64]
+```
+
+### Пример скрипта запуска
+Запускает 
+ - Мастера
+ - 10 воркеров
+```bash
+#!/bin/bash
+MASTER_PORT="8080"              # gRPC порт мастера
+MASTER_ENDPOINT="192.168.1.215" # IP host узла на котром запучен master
+HOST_RUNNER="192.168.1.215"     # IP или FQDN хоста на котром запучены воркеры
+WORKERS_COUNT="9"               # Кол-во воркеров 1-9
+
+echo "====== RUN MASTER ===== "
+docker run -ti --name master --rm -d \
+--env MASTER=true \
+--env DEBUG=true \
+--env MASTERPORT=$MASTER_PORT \
+-v $(pwd)/dbconfig.yaml:/home/minioclient/.config/dbconfig.yaml \
+-p $MASTER_PORT:$MASTER_PORT minioclient:amd64
+
+echo "===== RUN WORKERS ====="
+for ((i=1; i<WORKERS_COUNT; i++)); do
+    docker run -d --name "worker$i" --rm \
+    --env SLAVE=true \
+    --env DEBUG=true \
+    --env MASTERENDPOINT="$MASTER_ENDPOINT:$MASTER_PORT" \
+    --env HOST_RUNNER=$HOST_RUNNER \
+    --env HTTP_PORT="808$i" -p "808$i:808$i" minioclient:amd64
+done
 ```
 
 ## Лицензия

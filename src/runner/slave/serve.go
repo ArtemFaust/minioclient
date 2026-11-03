@@ -12,7 +12,7 @@ import (
 )
 
 // Метод запуска slave worker сервиса
-func StartWorker(masterendpoint string, ctx context.Context, conn *grpc.ClientConn) {
+func StartWorker(masterendpoint string, ctx context.Context, conn *grpc.ClientConn, httpport string) {
 	logrus.Info("Запуск воркера....")
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -33,10 +33,14 @@ func StartWorker(masterendpoint string, ctx context.Context, conn *grpc.ClientCo
 			case <-ctx.Done():
 				return
 			case <-tick:
-				utils.PrintStats()
+				utils.PrintStats(&cmd.MDB)
 			}
 		}
 	}(&wg)
+	// Запуск сервера обработки нотификаций от бакета
+	wg.Add(1)
+	cmd.HTTP_PORT = httpport
+	go cmd.NotificationServer(ctx, &wg)
 	wg.Wait()
 }
 

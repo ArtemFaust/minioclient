@@ -2,12 +2,15 @@ package utils
 
 import (
 	"fmt"
+	"minioclient/runner/memdb"
 	"runtime"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Метод печати данных работы worker
-func PrintStats() {
+func PrintStats(mdb *memdb.MemoryDatabase) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	// Расчет реальной физической памяти, удерживаемой рантаймом Go в данный момент
@@ -51,4 +54,18 @@ HeapReleased (возвращено ОС)        = %v MiB
 		m.HeapInuse/1024/1024,
 		m.HeapReleased/1024/1024,
 	)
+	if mdb != nil {
+		count, e := mdb.GetDBKeyCount()
+		if e != nil {
+			logrus.Errorf("Ошибка получения кол-ва ключей в mdb: %s", e.Error())
+		} else {
+			fmt.Printf(
+				`
+--- ДЕТАЛИЗАЦИЯ MEM DB ---
+Количетсво ключей в БД: %d
+`, count,
+			)
+		}
+
+	}
 }

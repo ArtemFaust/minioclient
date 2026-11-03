@@ -24,52 +24,58 @@ import (
 
 // Аргументы запуска
 var (
-	Server            *bool
-	Master            *bool
-	MasterPort        *string
-	Slave             *bool
-	MasterEndpoint    *string
-	Examples          *bool
-	EndPoint          *string
-	Port              *string
-	AccessKeyID       *string
-	SecretAccessKey   *string
-	UseSSL            *bool
-	MakeBucket        *bool
-	BucketName        *string
-	DtsBucketName     *string
-	Region            *string
-	DeleteBucket      *bool
-	ListBuckets       *bool
-	ListBucketObjects *bool
-	AppendObject      *bool
-	PutObject         *bool
-	RemoveObject      *bool
-	ByLastModify      *bool
-	GetObjectStats    *bool
-	GetObject         *bool
-	ListIncUpl        *bool
-	Force             *bool
-	Key               *string
-	VersionID         *string
-	ShowVersions      *bool
-	Path              *string
-	OutputType        *string
-	Debug             *bool
-	ObjectTags        *string
-	Not               *bool
-	DryRun            *bool
-	Prefix            *string
-	MaxEntrues        *int
-	ObjectLocking     *bool
-	FixLeak           *bool
-	LeakCount         *int
-	IndexPool         *string
-	ListPeerObject    *int
-	ListDirs          *bool
-	Interactive       *bool
-	Migrate           *bool
-	Destination       *string
+	Examples          *bool   // Печать примеров запуска
+	EndPoint          *string // Endpont подключения к s3 - host FQDN ip или название подключения из конфигурации
+	Port              *string // Порт подключения к S3 сервису
+	AccessKeyID       *string // Ключ доступа к S3
+	SecretAccessKey   *string // Приватный ключ доступа к S3
+	UseSSL            *bool   // Использовать SSL для подключения к S3
+	MakeBucket        *bool   // Ключ - операции создания бакета
+	BucketName        *string // Ключ - имя бакета
+	DtsBucketName     *string // Ключ - имя бакета названчения (используется в операции миграции)
+	Region            *string // Ключ - указывает регион подключения
+	DeleteBucket      *bool   // Ключ - удаления бакета
+	ListBuckets       *bool   // Ключ - получить списко бакетов
+	ListBucketObjects *bool   // Ключ - получит список объектов бакета
+	AppendObject      *bool   // Ключ - добавление объекта в бакет
+	PutObject         *bool   // Ключ - загрузки нового объекта в бакет
+	RemoveObject      *bool   // Ключ - удаления объекта из бакета
+	ByLastModify      *bool   // Ключ - управления логикой очистки бакета по атрибуту последней модификации
+	GetObjectStats    *bool   // Ключ - получение статистики объекта
+	GetObject         *bool   // Ключ - загрузка объекта из бакета
+	ListIncUpl        *bool   // Ключ - отобразить список неоконченных загрузок
+	Force             *bool   // Ключ - выполнение операции в форс режиме
+	Key               *string // Ключ - указать key объекта
+	VersionID         *string // Ключ - указать версии объекта
+	ShowVersions      *bool   // Ключ - отобразить версии объекта
+	Path              *string // Ключ - указать путь к файлу
+	OutputType        *string // Ключ - указать тип печати результата выполнения
+	Debug             *bool   // Ключ - запуск редима печати debug событий
+	ObjectTags        *string // Ключ - указать tag свойст объекта используется в процедуре удаления объектов из бакета
+	Not               *bool   // Ключ - инвертация режима анализа тегов
+	DryRun            *bool   // Ключ - запуск режима массового удаления только тест без реального удаления
+	Prefix            *string // Ключ - указать префикс объектов в бакете
+	MaxEntrues        *int    // Ключ - указать максимальное кол-во объектов в операции
+	ObjectLocking     *bool   // Ключ - включить блокировку объектов в бакете
+
+	// Применимо только к CEPH RGW
+	FixLeak   *bool   // Ключ - выполнить очитку rados rgw index pool в части залипшего объекта
+	LeakCount *int    // Ключ - указывает что объект залипший если он повторяется n раз подряд
+	IndexPool *string // Ключ - указать имя индексного пула
+
+	ListPeerObject *int    // Ключ - указать кол-во объектов в печати за 1 раз
+	ListDirs       *bool   // Ключ - вывод только директорий бакета
+	Interactive    *bool   // Ключ - запуск интерактивного режима
+	Migrate        *bool   // Ключ - запуск операции миграции объектов
+	Destination    *string // Ключ - указать назначение миграции
+
+	// Ключи относячиеся к режимам MASTER/WORKER
+	Server                      *bool   // Запуск сервиса миграции
+	Master                      *bool   // Запуск сервиса миграции в роли мастера управления
+	MasterPort                  *string // gRPC порт мастера миграции
+	Slave                       *bool   // Запуск сервиса миграции в роли worker
+	HttpNotificationHandlerPort *string // Порт запуска http сервера приема нотификаций бакета
+	MasterEndpoint              *string // Endpoint подключения воркера к мастеру по gRPC протаколу
 )
 
 // Глобальная переменная клиента
@@ -83,7 +89,7 @@ func init() {
 	Slave = flag.Bool("slave", false, "start slave worker")
 	MasterEndpoint = flag.String("masterendpoint", "", "example localhost:8080")
 	Examples = flag.Bool("examples", false, "print usage examples")
-	EndPoint = flag.String("e", "", "host fqdn or ip")
+	EndPoint = flag.String("e", "", "host fqdn or ip or name from config")
 	Port = flag.String("port", "", "api port")
 	AccessKeyID = flag.String("accesskey", "", "acess key id")
 	SecretAccessKey = flag.String("secretkey", "", "secret key")
@@ -123,6 +129,7 @@ func init() {
 	Migrate = flag.Bool("migrate", false, "Migrate bucket objects from source endpoint to destination endpoint")
 	Destination = flag.String("destination", "", "Destination endpoint for migrate bucket objects")
 	DtsBucketName = flag.String("dbn", "", "Destination bucket name for migrate operation")
+	HttpNotificationHandlerPort = flag.String("hnp", "8080", "Http notification handler port")
 	flag.Parse()
 
 	// Если дебаг отключен то вывод отбрасываем
@@ -234,7 +241,7 @@ func main() {
 		}
 
 		go slaveutils.Reconnect(ctx, conn)
-		slave.StartWorker(*MasterEndpoint, ctx, conn)
+		slave.StartWorker(*MasterEndpoint, ctx, conn, *HttpNotificationHandlerPort)
 	}
 
 	// Если не какие аргументы не переданны то запускаем TUI

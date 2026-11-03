@@ -116,7 +116,7 @@ func GetTask(masterendpoint string, ctx context.Context, conn *grpc.ClientConn) 
 }
 
 // Метод запроса обновления статуса задачи миграции
-func UpdateMigrateStatus(masterendpoint string, ctx context.Context, conn *grpc.ClientConn) error {
+func UpdateMigrateStatus(masterendpoint string, ctx context.Context, conn *grpc.ClientConn, report *api.MigrateReport) error {
 	select {
 	case <-ctx.Done():
 		return nil
@@ -137,12 +137,7 @@ func UpdateMigrateStatus(masterendpoint string, ctx context.Context, conn *grpc.
 				Status:         globals.TaskStatus,
 				StatusDetailed: "",
 			},
-			MigrateReport: &api.MigrateReport{
-				TotalObjects: 0,
-				ErrorObjects: 0,
-				DoneObjects:  0,
-				Errors:       []string{""},
-			},
+			MigrateReport: report,
 		})
 
 		if response == nil {

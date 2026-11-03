@@ -7,6 +7,7 @@ import (
 	bucketoperations "minioclient/bucket_operations"
 	"minioclient/global"
 	objectoperations "minioclient/object_operations"
+	topicoperations "minioclient/topicoperations"
 	filedialog "minioclient/tui/customwidgets/filedialog"
 	"minioclient/utils"
 	"os"
@@ -112,8 +113,30 @@ func makeBucketListWindow(wm *winman.Manager, client *global.GlobalClient, app *
 					}
 					modal.Hide()
 				}).
+				AddItem("Топики", "", '📝', func() {
+					showTopicList(wm, app, logger, client)
+					modal.Hide()
+				}).
+				AddItem("Нотификации", "", '🔔', func() {
+					if bucket_name != "" && client.MinioClient != nil && client.ClientCfg != nil {
+						showNotification(client, wm, app, bucket_name, logger)
+						modal.Hide()
+					}
+				}).
+				AddItem("Life Cycle", "", '🔁', func() {
+					if bucket_name != "" && client.MinioClient != nil && client.ClientCfg != nil {
+						showLifeCycle(client, wm, app, bucket_name, logger)
+						modal.Hide()
+					}
+				}).
+				AddItem("Политика", "", '🚨', func() {
+					if bucket_name != "" && client.MinioClient != nil && client.ClientCfg != nil {
+						showPolicy(client, wm, app, bucket_name, logger)
+						modal.Hide()
+					}
+				}).
 				AddItem("Закрыть меню", "", '❌', func() { modal.Hide() }).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
-			modal.SetRect(x+10, y, 22, 12)
+			modal.SetRect(x+10, y, 22, 15)
 			modal.SetModal(true)
 			modal.SetRoot(modallist)
 			modal.Show()
@@ -271,7 +294,11 @@ func getBucketInfo(client *global.GlobalClient, wm *winman.Manager, app *tview.A
 		Name: &bucket_name,
 	}
 
-	bi.Make(client)
+	e := bi.Make(client)
+	if e != nil {
+		logger <- fmt.Sprintf("Ошибка запроса свойств бакета: %s", e.Error())
+		return
+	}
 	makeBucketInfoModal(client, wm, app, logger, bi)
 }
 
@@ -284,7 +311,7 @@ func makeBucketInfoModal(client *global.GlobalClient, wm *winman.Manager, app *t
 	m.SetDraggable(true)
 	m.SetResizable(true)
 	m.SetBorder(true)
-	m.SetRect(w/3, h/4, 70, 40)
+	m.SetRect(w/3, h/4, 47, 19)
 	m.AddButton(&winman.Button{
 		Symbol:  '❌',
 		OnClick: func() { wm.RemoveWindow(m) },
@@ -292,13 +319,6 @@ func makeBucketInfoModal(client *global.GlobalClient, wm *winman.Manager, app *t
 
 	// Параметры бакета которые применяются к нему по нажатию кнопки применить
 	versioning := bi.Versioning.Enabled() // Реактивная переменная хранения статуса версионирования
-	var policy string                     // Реактивная переменная хранения политики бакета
-	var lc *lifecycle.Configuration       // Параметры LC
-	var notif notification.Configuration  // Параметры нотификации
-
-	tpol := tview.NewTextArea()   // Политики бакета
-	ttlc := tview.NewTextArea()   // LC бакета
-	tnotif := tview.NewTextArea() // Параметры нотификации
 
 	form := tview.NewForm().
 		AddInputField("Название бакета:", *bi.Name, 20, nil, nil).
@@ -311,166 +331,16 @@ func makeBucketInfoModal(client *global.GlobalClient, wm *winman.Manager, app *t
 		AddInputField("Байт:", bi.BytesUsed, 20, nil, nil).
 		AddInputField("Max buckets:", bi.MaxBuckets, 20, nil, nil).
 		AddButton("Применить", func() {
-			status := true
 			// Смена параметров версионирования
 			e := bi.ChangeVersioningSettings(client, versioning)
 			if e != nil {
-				status = false
 				logger <- fmt.Sprintf("Ошибка смены статуса версионирования для бакета %s : %s", *bi.Name, e.Error())
 			} else {
 				logger <- fmt.Sprintf("Переключение статуса версионирования для бакета %s выполнено", *bi.Name)
 			}
-
-			// Установка политики бакета
-			e = bi.ChangeBucketPolicy(client, policy)
-			if e != nil {
-				tpol.SetBorderColor(tcell.ColorRed)
-				status = false
-				logger <- fmt.Sprintf("Ошибка смены политики для бакета %s : %s", *bi.Name, e.Error())
-			} else {
-				tpol.SetBorderColor(tcell.ColorGreen)
-				logger <- fmt.Sprintf("Переключение политики для бакета %s выполнено", *bi.Name)
-			}
-
-			// Установка LC
-			e = bi.ChangeBucketLc(client, lc)
-			if e != nil {
-				ttlc.SetBorderColor(tcell.ColorRed)
-				status = false
-				logger <- fmt.Sprintf("Ошибка смены lc для бакета %s : %s", *bi.Name, e.Error())
-			} else {
-				ttlc.SetBorderColor(tcell.ColorGreen)
-				logger <- fmt.Sprintf("Переключение lc для бакета %s выполнено", *bi.Name)
-			}
-
-			// Установка NOTOFICATION
-			e = bi.ChangeNotificationConfig(client, notif)
-			if e != nil {
-				tnotif.SetBorderColor(tcell.ColorRed)
-				status = false
-				logger <- fmt.Sprintf("Ошибка смены notification для бакета %s : %s", *bi.Name, e.Error())
-			} else {
-				tnotif.SetBorderColor(tcell.ColorGreen)
-				logger <- fmt.Sprintf("Переключение notification для бакета %s выполнено", *bi.Name)
-			}
-			if !status {
-				m.SetBorderColor(tcell.ColorRed)
-			} else {
-				m.SetBorderColor(tcell.ColorGreen)
-			}
-
-		}).
-		AddButton("🔼 policy", func() {
-			fileselectB(wm, app, logger, tpol, "Выбор политики бакета "+*bi.Name)
-		}).
-		AddButton("🔼 lc", func() {
-			fileselectB(wm, app, logger, ttlc, "Выбор LC бакета "+*bi.Name)
-		}).
-		AddButton("🔼 notify", func() {
-			fileselectB(wm, app, logger, tnotif, "ВЫбор нотификации бакета "+*bi.Name)
 		})
-	// Политики
-	tpol.SetText(func() string {
-		policy = bi.Policy // Реактивная переменная сохраняет исходное значение
-		return policy      // Возвращаем форматированный объект
-	}(), false)
-	//tpol.SetTextColor(tcell.ColorWhite)
-	//tpol.SetDynamicColors(true)
-	tpol.SetBorder(true)
-	tpol.SetTitle("Policy")
-	//tpol.SetScrollable(true)
-	tpol.SetChangedFunc(func() {
-		// Валидация что текст является json
-		b := json.Valid([]byte(tpol.GetText()))
-		if !b {
-			tpol.SetBorderColor(tcell.ColorRed)
-		} else {
-			tpol.SetBorderColor(tcell.ColorGreen)
-			policy = tpol.GetText() // Меняем реактивную переменную
-		}
-	})
 
-	// LC
-	ttlc.SetText(func() string {
-		if bi.LifeCycle == nil {
-			return ""
-		}
-		// Выполняем десериализацию lc
-		b, e := json.MarshalIndent(bi.LifeCycle, " ", " ")
-		lc = bi.LifeCycle // Реативная переменная = текучему lc
-		// Если возникает ошибка десериализацию
-		if e != nil {
-			logger <- fmt.Sprintf("Ошибка десериализацию LC бакета: %s", e.Error())
-			return "" // Возвращаем пустую строку
-		}
-		// Выполняем форматирование строки
-		s, e := strconv.Unquote(string(b))
-		// Если возникает ошибка
-		if e != nil {
-			//logger <- fmt.Sprintf("Ошибка форматирования LC бакета: %s", e.Error())
-			return string(b) // Возвращаем строку без изменения
-		}
-		return s // Возвращаем форматированную строку
-	}(), false)
-	//ttlc.SetTextColor(tcell.ColorWhite)
-	//ttlc.SetDynamicColors(true)
-	ttlc.SetBorder(true)
-	ttlc.SetTitle("LC")
-	//ttlc.SetScrollable(true)
-	ttlc.SetChangedFunc(func() {
-		// Валидация что текст является json
-		if !json.Valid([]byte(ttlc.GetText())) {
-			ttlc.SetBorderColor(tcell.ColorRed)
-		} else {
-			e := json.Unmarshal([]byte(ttlc.GetText()), &lc)
-			if e != nil {
-				ttlc.SetBorderColor(tcell.ColorRed)
-			}
-			ttlc.SetBorderColor(tcell.ColorGreen)
-		}
-	})
-
-	// Параметры notification
-	tnotif.SetText(func() string {
-		//Выполняем десериализацию
-		b, e := json.MarshalIndent(bi.NotificationConfiguration, " ", " ")
-		notif = bi.NotificationConfiguration // Реативной переменной присваиваем текучее значение
-		// Если возникает ошибка
-		if e != nil {
-			logger <- fmt.Sprintf("Ошибка обработки notification бакета: %s", e.Error())
-			return "" // Возвращаем пустую строку
-		}
-
-		return string(b)
-	}(), false)
-	//tnotif.SetTextColor(tcell.ColorWhite)
-	//tnotif.SetDynamicColors(true)
-	tnotif.SetBorder(true)
-	tnotif.SetTitle("NOTIFICATION")
-	//tnotif.SetScrollable(true)
-	tnotif.SetChangedFunc(func() {
-		// Валидация что текст является json
-		if !json.Valid([]byte(tnotif.GetText())) {
-			tnotif.SetBorderColor(tcell.ColorRed)
-		} else {
-			e := json.Unmarshal([]byte(tnotif.GetText()), &notif)
-			if e != nil {
-				tnotif.SetBorderColor(tcell.ColorRed)
-			}
-			tnotif.SetBorderColor(tcell.ColorGreen)
-		}
-	})
-
-	grid := tview.NewGrid().
-		SetRows(-3, -1, -1, -1).
-		SetColumns(0).
-		SetBorders(false).
-		AddItem(form, 0, 0, 1, 1, 0, 0, false).
-		AddItem(tpol, 1, 0, 1, 1, 0, 0, false).
-		AddItem(ttlc, 2, 0, 1, 1, 0, 0, false).
-		AddItem(tnotif, 3, 0, 1, 1, 0, 0, false)
-
-	m.SetRoot(grid)
+	m.SetRoot(form)
 	m.SetTitle("Свойства бакета " + *bi.Name)
 	m.Show()
 	app.SetFocus(m)
@@ -591,9 +461,441 @@ func initMigrateBucketOperation(wm *winman.Manager, app *tview.Application,
 	m.SetRoot(form)
 	m.SetTitle("Миграция бакета")
 	m.AddButton(&winman.Button{
-		Symbol:  '❔',
+		Symbol:  '❌',
 		OnClick: func() { wm.RemoveWindow(m) },
 	})
 	m.Show()
 	app.SetFocus(m)
+}
+
+// Метод управления топиками нотификации
+func showTopicList(wm *winman.Manager, app *tview.Application, logger chan string, client *global.GlobalClient) {
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetBorder(true)
+	m.SetResizable(true)
+	m.SetRect((w*25)/100, h/4, 55, 10)
+
+	list, e := makeTopicList(wm, app, logger, client)
+	if e != nil {
+		logger <- "Ошибка формирования списка топиков: " + e.Error()
+		return
+	}
+
+	m.SetRoot(list)
+	m.SetTitle(" Управление топиками нотификации ")
+	m.AddButton(&winman.Button{
+		Symbol:  '❌',
+		OnClick: func() { wm.RemoveWindow(m) },
+	})
+	m.AddButton(&winman.Button{
+		Symbol: '🔄',
+		OnClick: func() {
+			func() {
+				list, e := makeTopicList(wm, app, logger, client)
+				if e != nil {
+					logger <- "Ошибка формирования списка топиков: " + e.Error()
+					return
+				}
+				m.SetRoot(list)
+			}()
+		},
+	})
+	m.AddButton(&winman.Button{
+		Symbol:  '➕',
+		OnClick: func() { showAddTopic(wm, app, logger, client) },
+	})
+	m.Show()
+	app.SetFocus(m)
+
+}
+
+// Метод создания списка топиков
+func makeTopicList(wm *winman.Manager, app *tview.Application, logger chan string, client *global.GlobalClient) (*tview.List, error) {
+	list := tview.NewList()
+	// Получаем списко топиков
+	topiclist, e := topicoperations.GetTopicsList(context.Background(), client.MinioClient)
+	if e != nil {
+		return list, e
+	}
+
+	// Формируем список топиков принадлежачих пользователю
+	for _, topik := range topiclist {
+		list.AddItem(topik, "", '📝', func() {
+			arn, _ := list.GetItemText(list.GetCurrentItem())
+			showTopicInfo(wm, app, logger, client, arn)
+		})
+	}
+	return list, nil
+}
+
+// Окно создания нового топика
+func showAddTopic(wm *winman.Manager, app *tview.Application, logger chan string, client *global.GlobalClient) {
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetBorder(true)
+	m.SetResizable(true)
+	m.SetRect((w*25)/100, h/4, 40, 20)
+
+	topicCfg := topicoperations.TopicConfig{}
+
+	form := tview.NewForm()
+	form.AddInputField("Имя топика", "", 0, nil, func(text string) { topicCfg.TopicName = text })
+	form.AddInputField("URL подключения", "", 0, nil, func(text string) { topicCfg.PushEndpoint = text })
+	form.AddCheckbox("Use ssl", false, func(checked bool) { topicCfg.UseSsl = checked })
+	form.AddCheckbox("Verify ssl", false, func(checked bool) { topicCfg.VerifySsl = checked })
+	form.AddInputField("HTTP auth user", "", 0, nil, func(text string) { topicCfg.HttpAuthUser = text })
+	form.AddInputField("HTTP user password", "", 0, nil, func(text string) { topicCfg.HttpAuthPassword = text })
+	form.AddCheckbox("Cloudevents format", false, func(checked bool) { topicCfg.CloudeventsFormat = checked })
+	form.AddButton("Создать", func() {
+		// Создание топика
+		topikcArn, e := topicoperations.CreateOrUpdateTopic(context.Background(), client.MinioClient, topicCfg)
+		if e != nil {
+			m.SetBorderColor(tcell.ColorRed)
+			logger <- fmt.Sprintf("Ошибка создания топика: %s Ошибка: %s", topicCfg.TopicName, e.Error())
+		} else {
+			m.SetBorderColor(tcell.ColorGreen)
+			logger <- fmt.Sprintf("Топик %s успешно создан", topikcArn)
+		}
+	})
+	form.AddButton("Отмена", func() { wm.RemoveWindow(m) })
+
+	m.SetRoot(form)
+	m.SetTitle(" Создание нового топика ")
+	m.AddButton(&winman.Button{
+		Symbol:  '❌',
+		OnClick: func() { wm.RemoveWindow(m) },
+	})
+	m.Show()
+	app.SetFocus(m)
+}
+
+// Овно информации о топике
+func showTopicInfo(wm *winman.Manager, app *tview.Application, logger chan string, client *global.GlobalClient, arn string) {
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetBorder(true)
+	m.SetResizable(true)
+	m.SetRect((w*25)/100, h/4, 40, 20)
+
+	attr, e := topicoperations.GetTopiCInfo(context.Background(), client.MinioClient, arn)
+	if e != nil {
+		logger <- "Ошибка получения свойств топика: " + arn
+		return
+	}
+
+	b, e := json.MarshalIndent(attr.Attributes, " ", " ")
+	if e != nil {
+		logger <- "Ошибка десериализации свойств топика: " + e.Error()
+		return
+	}
+
+	t := tview.NewTextArea().SetText(string(b), false)
+	m.SetRoot(t)
+
+	m.SetTitle(" Свойства топика ")
+	m.AddButton(&winman.Button{
+		Symbol:  '❌',
+		OnClick: func() { wm.RemoveWindow(m) },
+	})
+	m.AddButton(&winman.Button{
+		Symbol: '🔽',
+		OnClick: func() {
+			currentWorkDir, e := os.Getwd() // Текучая рабочая директория в которую нужно вернуться после окончания операции
+			if e != nil {
+				logger <- fmt.Sprintf("Ошибка получения текущей рабочей директории: %s", e.Error())
+				return
+			}
+
+			// Определяем папку загрузки в домашней диреткории пользователя
+			homedir, e := os.UserHomeDir()
+			if e != nil {
+				logger <- fmt.Sprintf("Ошибка получения домашней директории пользователя: %s", e.Error())
+				homedir = currentWorkDir
+			}
+
+			// Ищем директорию загрузки
+			var downloadsDir string
+			_, e = os.Stat(homedir + "/Downloads")
+			if e != nil {
+				_, e = os.Stat(homedir + "/Загрузки")
+				if e != nil {
+					e = os.Mkdir(homedir+"/Downloads", 0777)
+					if e != nil {
+						logger <- fmt.Sprintf("Ошибка создания директории Downloads: %s", e.Error())
+						return
+					}
+					downloadsDir = homedir + "/Downloads/"
+				}
+				downloadsDir = homedir + "/Загрузки/"
+			} else {
+				downloadsDir = homedir + "/Downloads/"
+			}
+
+			// Смена рабочей директории на директорию в которую загружаем объекты
+			e = os.Chdir(downloadsDir + "/")
+			if e != nil {
+				logger <- fmt.Sprintf("Ошибка смены рабочей директории: %s", e.Error())
+				return
+			}
+
+			e = os.WriteFile(arn+".json", []byte(t.GetText()), 0777)
+			if e != nil {
+				logger <- fmt.Sprintf("Ошибка созранения файла конфигурации топика %s Ошибка: %s", arn, e.Error())
+			}
+
+			// Обратная смена рабочей директории
+			e = os.Chdir(currentWorkDir)
+			if e != nil {
+				logger <- fmt.Sprintf("Ошибка смены рабочей директории: %s", e.Error())
+				return
+			}
+		},
+	})
+	m.AddButton(&winman.Button{
+		Symbol: '➖',
+		OnClick: func() {
+			defer wm.RemoveWindow(m)
+			_, e := topicoperations.RemoveTopic(context.Background(), client.MinioClient, arn)
+			if e != nil {
+				logger <- fmt.Sprintf("Ошибка удаления топика %s Ошибка: %s", arn, e.Error())
+				return
+			}
+			logger <- fmt.Sprintf("Выполнено удалени топика %s ", arn)
+		},
+	})
+	m.Show()
+	app.SetFocus(m)
+}
+
+// Метод отображения окна конфигурации нотификации
+func showNotification(client *global.GlobalClient, wm *winman.Manager, app *tview.Application, bucket_name string,
+	logger chan string) {
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetResizable(true)
+	m.SetBorder(true)
+	m.SetRect(w/3, h/4, 70, 30)
+
+	logger <- "Запрос свойств бакета"
+	bi := bucketoperations.BucketInfo{
+		Name: &bucket_name,
+	}
+
+	e := bi.Make(client)
+	if e != nil {
+		logger <- fmt.Sprintf("Ошибка запроса свойств бакета: %s", e.Error())
+		return
+	}
+
+	var notif notification.Configuration // Параметры нотификации
+
+	// Параметры notification
+	tnotif := tview.NewTextArea() // Параметры нотификации
+	tnotif.SetText(func() string {
+		//Выполняем десериализацию
+		b, e := json.MarshalIndent(bi.NotificationConfiguration, " ", " ")
+		notif = bi.NotificationConfiguration // Реативной переменной присваиваем текучее значение
+		// Если возникает ошибка
+		if e != nil {
+			logger <- fmt.Sprintf("Ошибка обработки notification бакета: %s", e.Error())
+			return "" // Возвращаем пустую строку
+		}
+
+		return string(b)
+	}(), false)
+	//tnotif.SetTextColor(tcell.ColorWhite)
+	//tnotif.SetDynamicColors(true)
+	tnotif.SetBorder(false)
+	//tnotif.SetScrollable(true)
+	tnotif.SetChangedFunc(func() {
+		// Валидация что текст является json
+		if !json.Valid([]byte(tnotif.GetText())) {
+			m.SetBorderColor(tcell.ColorRed)
+		} else {
+			e := json.Unmarshal([]byte(tnotif.GetText()), &notif)
+			if e != nil {
+				m.SetBorderColor(tcell.ColorRed)
+			}
+			m.SetBorderColor(tcell.ColorGreen)
+		}
+	})
+
+	m.SetRoot(tnotif)
+	m.SetTitle("Параметры нотификации бакета " + *bi.Name)
+	m.AddButton(&winman.Button{
+		Symbol:  '❌',
+		OnClick: func() { wm.RemoveWindow(m) },
+	})
+	m.AddButton(&winman.Button{
+		Symbol: '💾',
+		OnClick: func() {
+			e = bi.ChangeNotificationConfig(client, notif)
+			if e != nil {
+				m.SetBorderColor(tcell.ColorRed)
+				logger <- fmt.Sprintf("Ошибка смены notification для бакета %s : %s", *bi.Name, e.Error())
+				return
+			}
+			m.SetBorderColor(tcell.ColorGreen)
+			logger <- fmt.Sprintf("Смена notification для бакета %s выполнено", *bi.Name)
+		},
+	})
+	m.Show()
+	app.SetFocus(m)
+}
+
+// Метод отображения окна LC
+func showLifeCycle(client *global.GlobalClient, wm *winman.Manager, app *tview.Application, bucket_name string,
+	logger chan string) {
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetResizable(true)
+	m.SetBorder(true)
+	m.SetRect(w/3, h/4, 70, 30)
+
+	logger <- "Запрос свойств бакета"
+	bi := bucketoperations.BucketInfo{
+		Name: &bucket_name,
+	}
+
+	e := bi.Make(client)
+	if e != nil {
+		logger <- fmt.Sprintf("Ошибка запроса свойств бакета: %s", e.Error())
+		return
+	}
+
+	var lc *lifecycle.Configuration // Параметры LC
+	ttlc := tview.NewTextArea()     // LC бакета
+	ttlc.SetText(func() string {
+		if bi.LifeCycle == nil {
+			return ""
+		}
+		// Выполняем десериализацию lc
+		b, e := json.MarshalIndent(bi.LifeCycle, " ", " ")
+		lc = bi.LifeCycle // Реативная переменная = текучему lc
+		// Если возникает ошибка десериализацию
+		if e != nil {
+			logger <- fmt.Sprintf("Ошибка десериализацию LC бакета: %s", e.Error())
+			return "" // Возвращаем пустую строку
+		}
+		// Выполняем форматирование строки
+		s, e := strconv.Unquote(string(b))
+		// Если возникает ошибка
+		if e != nil {
+			//logger <- fmt.Sprintf("Ошибка форматирования LC бакета: %s", e.Error())
+			return string(b) // Возвращаем строку без изменения
+		}
+		return s // Возвращаем форматированную строку
+	}(), false)
+	//ttlc.SetTextColor(tcell.ColorWhite)
+	//ttlc.SetDynamicColors(true)
+	ttlc.SetBorder(false)
+	//ttlc.SetScrollable(true)
+	ttlc.SetChangedFunc(func() {
+		// Валидация что текст является json
+		if !json.Valid([]byte(ttlc.GetText())) {
+			m.SetBorderColor(tcell.ColorRed)
+		} else {
+			e := json.Unmarshal([]byte(ttlc.GetText()), &lc)
+			if e != nil {
+				m.SetBorderColor(tcell.ColorRed)
+			}
+			m.SetBorderColor(tcell.ColorGreen)
+		}
+	})
+
+	m.SetRoot(ttlc)
+	m.SetTitle("Параметры LC бакета " + *bi.Name)
+	m.AddButton(&winman.Button{
+		Symbol:  '❌',
+		OnClick: func() { wm.RemoveWindow(m) },
+	})
+	m.AddButton(&winman.Button{
+		Symbol: '💾',
+		OnClick: func() {
+			e = bi.ChangeBucketLc(client, lc)
+			if e != nil {
+				m.SetBorderColor(tcell.ColorRed)
+				logger <- fmt.Sprintf("Ошибка смены lc для бакета %s : %s", *bi.Name, e.Error())
+			} else {
+				m.SetBorderColor(tcell.ColorGreen)
+				logger <- fmt.Sprintf("Смена lc для бакета %s выполнено", *bi.Name)
+			}
+		},
+	})
+	m.Show()
+	app.SetFocus(m)
+
+}
+
+// Метод отображения окна политик
+func showPolicy(client *global.GlobalClient, wm *winman.Manager, app *tview.Application, bucket_name string,
+	logger chan string) {
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetResizable(true)
+	m.SetBorder(true)
+	m.SetRect(w/3, h/4, 70, 30)
+
+	logger <- "Запрос свойств бакета"
+	bi := bucketoperations.BucketInfo{
+		Name: &bucket_name,
+	}
+
+	e := bi.Make(client)
+	if e != nil {
+		logger <- fmt.Sprintf("Ошибка запроса свойств бакета: %s", e.Error())
+		return
+	}
+
+	var policy string           // Реактивная переменная хранения политики бакета
+	tpol := tview.NewTextArea() // Политики бакета
+
+	tpol.SetText(func() string {
+		policy = bi.Policy // Реактивная переменная сохраняет исходное значение
+		return policy      // Возвращаем форматированный объект
+	}(), false)
+	//tpol.SetTextColor(tcell.ColorWhite)
+	//tpol.SetDynamicColors(true)
+	tpol.SetBorder(true)
+	tpol.SetTitle("Policy")
+	//tpol.SetScrollable(true)
+	tpol.SetChangedFunc(func() {
+		// Валидация что текст является json
+		b := json.Valid([]byte(tpol.GetText()))
+		if !b {
+			tpol.SetBorderColor(tcell.ColorRed)
+		} else {
+			tpol.SetBorderColor(tcell.ColorGreen)
+			policy = tpol.GetText() // Меняем реактивную переменную
+		}
+	})
+
+	m.SetTitle("Политика бакета " + *bi.Name)
+	m.AddButton(&winman.Button{
+		Symbol:  '❌',
+		OnClick: func() { wm.RemoveWindow(m) },
+	})
+	m.AddButton(&winman.Button{
+		Symbol: '💾',
+		OnClick: func() {
+			e = bi.ChangeBucketPolicy(client, policy)
+			if e != nil {
+				m.SetBorderColor(tcell.ColorRed)
+				logger <- fmt.Sprintf("Ошибка смены policy для бакета %s : %s", *bi.Name, e.Error())
+			} else {
+				m.SetBorderColor(tcell.ColorGreen)
+				logger <- fmt.Sprintf("Смена policy для бакета %s выполнено", *bi.Name)
+			}
+		},
+	})
+	m.Show()
+	app.SetFocus(m)
+
 }

@@ -251,6 +251,7 @@ func (rpc *Master) UpdateMigrateTaskStatus(ctx context.Context, req *api.UpdateM
 		TotalObjects: uint(req.MigrateReport.TotalObjects),
 		ErrorObjects: uint(req.MigrateReport.ErrorObjects),
 		DoneObjects:  uint(req.MigrateReport.DoneObjects),
+		Difference:   uint(req.MigrateReport.Difference),
 		Errors:       req.MigrateReport.Errors,
 	}
 

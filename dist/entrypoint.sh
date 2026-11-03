@@ -34,12 +34,12 @@ function runmaster {
 function runslave {
     if [[ $DEBUG == "true" ]];
     then
-        $EXEC -serve -slave -masterendpoint $MASTERENDPOINT -d
+        $EXEC -serve -slave -masterendpoint $MASTERENDPOINT -d -hnp $HTTP_PORT
         exit $?
     fi
     if [[ $DEBUG == "false" ]];
     then
-        $EXEC -serve -slave -masterendpoint $MASTERENDPOINT
+        $EXEC -serve -slave -masterendpoint $MASTERENDPOINT -hnp $HTTP_PORT
         exit $?
     fi
 }

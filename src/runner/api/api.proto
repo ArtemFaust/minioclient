@@ -30,7 +30,8 @@ message MigrateReport {
 	uint64 TotalObjects = 1;    // Счетчик всех обработанных объектов
 	uint64 ErrorObjects = 2;    // Счетчик обработанных объектов с ошибкой
 	uint64 DoneObjects  = 3;    // Счетчик обработанных объектов без ошибки
-	repeated string Errors = 4; // Список ошибок
+    uint64 Difference = 4;      // Счетчик разници операций над объектами накопленный за время миграции полученный через bucket notification
+	repeated string Errors = 5; // Список ошибок
 }
 
 

@@ -16,14 +16,14 @@ then
     if [[ $2 == "amd64" ]];
     then
       docker build . --platform=linux/amd64 --tag minioclint_builder_amd64:latest
-      docker run --platform linux/$2 --rm -ti  \
+      docker run --dns 8.8.8.8 --platform linux/$2 --rm -ti  \
       -v ../src:/opt/src \
       -v ../dist:/opt/dist\
        minioclint_builder_amd64:latest bash ./entrypoint.sh
     elif [[ $2 == "arm64" ]];
     then
       docker build . --platform=linux/arm64 --tag minioclint_builder_arm64:latest
-      docker run --platform linux/$2 --rm -ti \
+      docker run --dns 8.8.8.8 --platform linux/$2 --rm -ti \
       -v ../src:/opt/src \
       -v ../dist:/opt/dist\
       minioclint_builder_arm64:latest bash ./entrypoint.sh

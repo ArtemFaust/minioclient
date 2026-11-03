@@ -26,43 +26,50 @@ type BucketInfo struct {
 	BytesUsed                 string
 }
 
-func (b *BucketInfo) Make(client *global.GlobalClient) {
+func (b *BucketInfo) Make(client *global.GlobalClient) error {
 
 	f, e := CheckBucketExist(client, b.Name)
 	if !f {
-		return
+		return e
 	}
 	if e != nil {
-		return
+		return e
 	}
-	b.Versioning = func() minio.BucketVersioningConfiguration {
-		v, _ := client.MinioClient.GetBucketVersioning(context.Background(), *b.Name)
-		return v
+
+	b.Versioning, e = func() (minio.BucketVersioningConfiguration, error) {
+		return client.MinioClient.GetBucketVersioning(context.Background(), *b.Name)
+	}()
+	if e != nil {
+		return e
+	}
+
+	b.Location, e = func() (string, error) {
+		return client.MinioClient.GetBucketLocation(context.Background(), *b.Name)
+	}()
+	if e != nil {
+		return e
+	}
+
+	b.LifeCycle, e = func() (*lifecycle.Configuration, error) {
+		return client.MinioClient.GetBucketLifecycle(context.Background(), *b.Name)
 	}()
 
-	b.Location = func() string {
-		location, _ := client.MinioClient.GetBucketLocation(context.Background(), *b.Name)
-		return location
+	b.NotificationConfiguration, e = func() (notification.Configuration, error) {
+		return client.MinioClient.GetBucketNotification(context.Background(), *b.Name)
 	}()
+	if e != nil {
+		return e
+	}
 
-	b.LifeCycle = func() *lifecycle.Configuration {
-		lc, _ := client.MinioClient.GetBucketLifecycle(context.Background(), *b.Name)
-		return lc
+	b.Cors, e = func() (*cors.Config, error) {
+		return client.MinioClient.GetBucketCors(context.Background(), *b.Name)
 	}()
+	if e != nil {
+		return e
+	}
 
-	b.NotificationConfiguration = func() notification.Configuration {
-		notif, _ := client.MinioClient.GetBucketNotification(context.Background(), *b.Name)
-		return notif
-	}()
-
-	b.Cors = func() *cors.Config {
-		cors, _ := client.MinioClient.GetBucketCors(context.Background(), *b.Name)
-		return cors
-	}()
-
-	b.Policy = func() string {
-		policy, _ := client.MinioClient.GetBucketPolicy(context.Background(), *b.Name)
-		return policy
+	b.Policy, e = func() (string, error) {
+		return client.MinioClient.GetBucketPolicy(context.Background(), *b.Name)
 	}()
 
 	stats, e := customoperations.GetRgwBucketStats(client, *b.Name, "")
@@ -90,6 +97,7 @@ func (b *BucketInfo) Make(client *global.GlobalClient) {
 			return "undefined"
 		}()
 	}
+	return nil
 }
 
 func (b *BucketInfo) ChangeVersioningSettings(client *global.GlobalClient, enable bool) error {

@@ -1,12 +1,16 @@
 package migratemanager
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"minioclient/runner/db"
+	"minioclient/tui/customwidgets"
 	"minioclient/utils"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/epiclabs-io/winman"
@@ -15,6 +19,8 @@ import (
 	"golang.org/x/term"
 	"gorm.io/gorm"
 )
+
+var reportrefresh bool // Защита от накопления запросов обновления
 
 // Метод создания и обновления таблици workers
 func makeWorkersTable(wm *winman.Manager, app *tview.Application,
@@ -42,12 +48,22 @@ func makeWorkersTable(wm *winman.Manager, app *tview.Application,
 		return nil
 	}
 
+	// сортируем список объектов (что бы не пригал)
+	sort.Slice(workers, func(i, j int) bool {
+		return workers[i].ID < workers[j].ID
+	})
+
 	for x, worker := range workers {
 		table.SetCell(x+1, 0,
 			tview.NewTableCell(worker.Uuid).
 				SetClickedFunc(func() bool {
 					cell := table.GetCell(x+1, 0)
-					showWorkerContext(wm, app, cell, logger, d)
+					uuid := cell.Text
+					taskid, e := strconv.Atoi(strings.Split(table.GetCell(x+1, 7).Text, " ")[1])
+					if e != nil {
+						logger <- "Ошибка определния ID задачи"
+					}
+					showWorkerContext(wm, app, uuid, uint(taskid), logger, d, cell)
 					return true
 				}).
 				SetTextColor(tcell.ColorYellow).
@@ -360,8 +376,8 @@ func showWorkersTaskIdContext(wm *winman.Manager, app *tview.Application, cell *
 }
 
 // Метод отображения меню workera
-func showWorkerContext(wm *winman.Manager, app *tview.Application, cell *tview.TableCell,
-	logger chan string, d *gorm.DB) {
+func showWorkerContext(wm *winman.Manager, app *tview.Application, uuid string, taskid uint,
+	logger chan string, d *gorm.DB, cell *tview.TableCell) {
 	x, y, _ := cell.GetLastPosition()
 	//w, _, _ := term.GetSize(int(os.Stdout.Fd()))
 	m := wm.NewWindow()
@@ -369,10 +385,9 @@ func showWorkerContext(wm *winman.Manager, app *tview.Application, cell *tview.T
 	m.SetBorder(true)
 	m.SetResizable(false)
 	m.SetRect(x, y, 25, 10)
-
 	list := tview.NewList()
-	list.AddItem("Отчет выполнения", "", ' ', func() { wm.RemoveWindow(m) })
-	list.AddItem("[red]Удалить[white]", "", ' ', func() { removeWorker(cell.Text, logger, d); wm.RemoveWindow(m) })
+	list.AddItem("Отчет выполнения", "", ' ', func() { showTaskMigrateReport(wm, app, uuid, taskid, logger, d); wm.RemoveWindow(m) })
+	list.AddItem("[red]Удалить[white]", "", ' ', func() { removeWorker(uuid, logger, d); wm.RemoveWindow(m) })
 	list.AddItem("Закрыть меню", "", ' ', func() { wm.RemoveWindow(m) })
 	list.SetCurrentItem(-1)
 
@@ -423,4 +438,111 @@ func removeWorker(uuid string, logger chan string, d *gorm.DB) error {
 	}
 
 	return nil
+}
+
+// Метод отображения отчета выполнения
+func showTaskMigrateReport(wm *winman.Manager, app *tview.Application, uuid string, taskid uint,
+	logger chan string, d *gorm.DB) {
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	m := wm.NewWindow()
+	m.SetDraggable(true)
+	m.SetBorder(true)
+	m.SetResizable(false)
+	m.SetRect((w*25)/100, h/4, (w*60)/100, 15)
+
+	m.SetRoot(makeReport(wm, app, uuid, taskid, logger, d))
+
+	// Контекст выполнения автообновления
+	ctx, cancel := context.WithCancel(context.Background())
+
+	m.SetTitle(fmt.Sprintf(" Отчет выполнения задачи %d ", taskid))
+	m.AddButton(&winman.Button{
+		Symbol:  '❌',
+		OnClick: func() { cancel(); reportrefresh = false; wm.RemoveWindow(m) },
+	})
+	m.AddButton(&winman.Button{
+		Symbol: '🔄',
+		OnClick: func() {
+			if !reportrefresh {
+				m.SetRoot(makeReport(wm, app, uuid, taskid, logger, gormdb.Db))
+			}
+		},
+	})
+	m.Show()
+	// Запуск автообновления
+	go reportAutoUpdate(m, ctx, wm, app, uuid, taskid, logger, d)
+	app.SetFocus(m)
+}
+
+// Метод создания отчета
+func makeReport(wm *winman.Manager, app *tview.Application, uuid string, taskid uint,
+	logger chan string, d *gorm.DB) *tview.Grid {
+	defer func() { reportrefresh = false }()
+	reportrefresh = true
+	grid := tview.NewGrid()
+	r := db.MigrateReport{
+		Uuid:   uuid,
+		TaskID: taskid,
+	}
+
+	report, e := r.GetMigrateReport(d)
+	if e != nil {
+		logger <- "Ошибка получения отчета выполнения для задачи: " + e.Error()
+		grid.AddItem(tview.NewTextView().SetText("Нет данных для отображения").SetTextColor(tcell.ColorGray),
+			0, 0, 1, 1, 0, 0, true)
+		return grid
+	}
+
+	grid.SetRows(-1)
+	grid.SetColumns(-1, -2)
+	grid.SetBorders(false)
+
+	form := tview.NewForm()
+	form.AddTextView("Difference: ", strconv.Itoa(int(report.Difference)), 0, 1, true, true)
+	form.AddTextView("Total: ", strconv.Itoa(int(report.TotalObjects)), 0, 1, true, true)
+	form.AddTextView("Done:", strconv.Itoa(int(report.DoneObjects)), 0, 1, true, true)
+	form.AddTextView("Errors:", strconv.Itoa(int(report.ErrorObjects)), 0, 1, true, true)
+
+	grid.AddItem(form, 0, 0, 1, 1, 0, 0, true)
+	grid.AddItem(customwidgets.NewChart("Migration", []customwidgets.DataItem{
+		customwidgets.DataItem{
+			Label: "Difference",
+			Value: int(report.Difference),
+			Color: tcell.ColorYellow,
+		},
+		customwidgets.DataItem{
+			Label: "Total",
+			Value: int(report.TotalObjects),
+			Color: tcell.ColorGrey,
+		},
+		customwidgets.DataItem{
+			Label: "Done",
+			Value: int(report.DoneObjects),
+			Color: tcell.ColorGreen,
+		},
+		customwidgets.DataItem{
+			Label: "Error",
+			Value: int(report.ErrorObjects),
+			Color: tcell.ColorRed,
+		},
+	}, app, int(report.TotalObjects)), 0, 1, 1, 1, 0, 0, true)
+
+	return grid
+
+}
+
+// Метод автоматического обновления report
+func reportAutoUpdate(m *winman.WindowBase, ctx context.Context, wm *winman.Manager, app *tview.Application, uuid string, taskid uint,
+	logger chan string, d *gorm.DB) {
+	tick := time.Tick(2 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick:
+			if !reportrefresh {
+				m.SetRoot(makeReport(wm, app, uuid, taskid, logger, gormdb.Db))
+			}
+		}
+	}
 }

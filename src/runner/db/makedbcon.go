@@ -8,6 +8,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // Создание экземпляра подключения к БД
@@ -45,7 +46,9 @@ func pgdbConnect(host string, user string, password string, dbname string, port 
 			return "disable"
 		}(),
 	)
-	db, e := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, e := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if e != nil {
 		return nil, nil, e
 	}
@@ -65,7 +68,9 @@ func sqlitedbConnect(dbname string) (db *gorm.DB, err error) {
 	// ?_busy_timeout=5000&_synchronous=NORMAL&_journal_mode=WAL&cache=private
 	dsn := dbname + "?_busy_timeout=5000&_synchronous=FULL&_journal_mode=DELETE&cache=private"
 
-	db, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	db, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
 		return nil, err
 	}

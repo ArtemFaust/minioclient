@@ -29,6 +29,7 @@ type Report struct {
 	TotalObjects atomic.Uint64 // Счетчик всех обработанных объектов
 	ErrorObjects atomic.Uint64 // Счетчик обработанных объектов с ошибкой
 	DoneObjects  atomic.Uint64 // Счетчик обработанных объектов без ошибки
+	Difference   atomic.Uint64 // Четчик накопленных операций над бакетом источником с начала миграции
 	Errors       []error       // Список ошибок
 }
 
