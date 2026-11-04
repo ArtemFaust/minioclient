@@ -152,7 +152,7 @@ func migrateTask(task *api.GetTaskResponse, ctx context.Context, me string, conn
 		VerifySsl:         false,                                                                                                       // Мы говорим что даже ели вдруг при подключении окажется что там ssl то не проверять
 		HttpAuthUser:      "",                                                                                                          // В нашем воркере нет аутентификации (пока что)
 		HttpAuthPassword:  "",                                                                                                          // В нашем воркере нет аутентификации (пока что)
-		CloudeventsFormat: false,                                                                                                       // Нам не итересен данный формат
+		CloudeventsFormat: true,                                                                                                        // Нам интересен данный формат
 	}, taskWorker.FromBucket, taskWorker.Prefix)
 	if e != nil {
 		return e

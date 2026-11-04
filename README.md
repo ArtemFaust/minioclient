@@ -461,28 +461,50 @@ minioclient:[arm64|amd64]
  - 10 воркеров
 ```bash
 #!/bin/bash
-MASTER_PORT="8080"              # gRPC порт мастера
-MASTER_ENDPOINT="192.168.1.215" # IP host узла на котром запучен master
-HOST_RUNNER="192.168.1.215"     # IP или FQDN хоста на котром запучены воркеры
-WORKERS_COUNT="9"               # Кол-во воркеров 1-9
+MASTER_PORT="8080"
+MASTER_ENDPOINT="192.168.1.215"
+HOST_RUNNER="192.168.1.215"
+WORKERS_COUNT="9"
 
-echo "====== RUN MASTER ===== "
-docker run -ti --name master --rm -d \
---env MASTER=true \
---env DEBUG=true \
---env MASTERPORT=$MASTER_PORT \
--v $(pwd)/dbconfig.yaml:/home/minioclient/.config/dbconfig.yaml \
--p $MASTER_PORT:$MASTER_PORT minioclient:amd64
+function start {
+  echo "====== RUN MASTER ===== "
+  docker run -ti --name master --rm -d \
+  --env MASTER=true \
+  --env DEBUG=true \
+  --env MASTERPORT=$MASTER_PORT \
+  -v $(pwd)/dbconfig.yaml:/home/minioclient/.config/dbconfig.yaml \
+  -p $MASTER_PORT:$MASTER_PORT minioclient:amd64
 
-echo "===== RUN WORKERS ====="
-for ((i=1; i<WORKERS_COUNT; i++)); do
-    docker run -d --name "worker$i" --rm \
-    --env SLAVE=true \
-    --env DEBUG=true \
-    --env MASTERENDPOINT="$MASTER_ENDPOINT:$MASTER_PORT" \
-    --env HOST_RUNNER=$HOST_RUNNER \
-    --env HTTP_PORT="808$i" -p "808$i:808$i" minioclient:amd64
-done
+  echo "===== RUN WORKERS ====="
+  for ((i=1; i<WORKERS_COUNT; i++)); do
+      docker run -d --name "worker$i" --rm \
+      --env SLAVE=true \
+      --env DEBUG=true \
+      --env MASTERENDPOINT="$MASTER_ENDPOINT:$MASTER_PORT" \
+      --env HOST_RUNNER=$HOST_RUNNER \
+      --env HTTP_PORT="808$i" -p "808$i:808$i" minioclient:amd64
+  done
+}
+
+function stop {
+  for container in $(docker ps -a | grep minio | cut -d " " -f 1);
+  do
+    echo "====== STOP CONTAINER $container ======"
+    docker stop $container
+  done
+}
+
+if [[ $1 == "stop" ]];
+then
+    stop
+    exit 0
+fi
+
+if [[ $1 == "start" ]];
+then
+    start
+    exit 0
+fi
 ```
 
 ## Лицензия
