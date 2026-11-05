@@ -28,98 +28,70 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Метод выполнения задачи миграции бакета
-func migrateTask(task *api.GetTaskResponse, ctx context.Context, me string, conn *grpc.ClientConn) error {
-	reporter := objectoperations.Report{}
+// Структура описывающая общие свойства задачи миграции
+type MigrateProps struct {
+	WorkerUuid        string                   // UUID ворекра исполнителя
+	Reporter          *objectoperations.Report // Глобальный экземпляр reporter
+	GlobalContext     context.Context          // Глобальный контекст выполнения
+	GrpcClientConn    *grpc.ClientConn         // Глобальный экземпляр подключения к мастеру
+	Me                string                   // Endpoint подключения к мастеру
+	RawTask           *api.GetTaskResponse     // Сырая задача полученная от мастера
+	TaskWorker        models.WorkerMigrateTask // Экземпляр задачи
+	Client            *global.GlobalClient     // Глобальная конфигурация клиента
+	WaitGoup          *sync.WaitGroup          // Группа ожидания синхронизация горутин
+	TaskContext       context.Context          // Контекст управления задаей
+	TaskContextCancel context.CancelFunc       // Функция отмены задачи
+	InteractiveFlag   bool                     // Флаг интерактивности
+	ServerFlag        bool                     // Флаг серверного запуска
+	DebugFlag         bool                     // Флаг режима вывода сообщений
+	Threads           int                      // Кол-во поток выполнения (деление на батчи)
+}
 
-	// После окончания выполнения процесса миграции
-	// выполняем финальную отправку состояния и выполняем сброс memdb для очистки памяти
-	defer func() {
-		// Сброс memDB выполняется в конце после методов доливки
-		e := MDB.DropDB()
+// Метод инициализации экземпляра свойств миграции
+func (m *MigrateProps) Init(ctx context.Context, conn *grpc.ClientConn, me string, rawtask *api.GetTaskResponse) error {
+	var e error
+	m.WorkerUuid, _, _, e = slaveutils.GenUuid()
+	if e != nil {
+		return e
+	}
+	m.RawTask = rawtask
+	m.GlobalContext = ctx
+	m.GrpcClientConn = conn
+	m.Me = me
+	m.TaskWorker, e = func() (models.WorkerMigrateTask, error) {
+		var taskWorker models.WorkerMigrateTask
+		b, e := runnerutils.Decoder(string(m.RawTask.Task), m.WorkerUuid)
 		if e != nil {
-			logrus.Errorf("Ошибка выполнения сброса memdb: %s", e.Error())
-		} else {
-			logrus.Info("Сброс memdb выполнен успешно")
+			return taskWorker, e
 		}
-		keycount, _ := MDB.GetDBKeyCount()
-		reporter.Difference.Store(uint64(keycount))
-		UpdateMigrateStatus(me, ctx, conn, &api.MigrateReport{
-			TotalObjects: reporter.TotalObjects.Load(),
-			ErrorObjects: reporter.ErrorObjects.Load(),
-			DoneObjects:  reporter.DoneObjects.Load(),
-			Difference:   reporter.Difference.Load(),
-		})
+		if e := json.Unmarshal(b, &taskWorker); e != nil {
+			// Ошибка десериализации задачи
+			globals.TaskStatus = "error"
+			return taskWorker, e
+		}
+		return taskWorker, nil
 	}()
-
-	// Задача миграции бакета
-	// Обновление статуса задачи методом UpdateMigrateStatus
-	globals.TaskStatus = "in-progress"
-	keycount, _ := MDB.GetDBKeyCount()
-	reporter.Difference.Store(uint64(keycount))
-	e := UpdateMigrateStatus(me, ctx, conn, &api.MigrateReport{
-		TotalObjects: reporter.TotalObjects.Load(),
-		ErrorObjects: reporter.ErrorObjects.Load(),
-		DoneObjects:  reporter.DoneObjects.Load(),
-		Difference:   reporter.Difference.Load(),
-	})
-	if e != nil {
-		globals.TaskStatus = "error"
-		logrus.Error("Ошибка выполнения запроса на обновление статуса задачи: ", e.Error())
-		return errors.New("Ошибка выполнения запроса на обновление статуса задачи (задача не будет выполненна): " + e.Error())
-	}
-
-	// Запуск миграции
-	time.Sleep(30 * time.Second) // Ждем 30 секунд - задержка перед стартом на всякий случай
-
-	// Извлекаем задачу
-	var taskWorker models.WorkerMigrateTask
-	uuid, _, _, e := slaveutils.GenUuid()
-	if e != nil {
-		return e
-	}
-	b, e := runnerutils.Decoder(string(task.Task), uuid)
-	if e != nil {
-		return e
-	}
-	if e := json.Unmarshal(b, &taskWorker); e != nil {
-		// Ошибка десериализации задачи
-		globals.TaskStatus = "error"
-		return e
-	}
-
-	// Создаем конфигурационный фаил - он нужен для создания toclient
-	e = writeConfigFile(taskWorker)
-	if e != nil {
-		globals.TaskStatus = "error"
-		return e
-	}
-
-	// Контекст выполнения задачи
-	// Данный конттекст будет использоваться для прерывания задачи по сигналу
-	taskctx, taskcancel := context.WithCancel(context.Background())
-	defer taskcancel()
-
-	// Создание клиента источника миграции
-	client, connection, e := utils.InitClient(
-		&taskWorker.From.Endpoints[0], &taskWorker.From.Port, &taskWorker.From.Acesskey, &taskWorker.From.Secretkey, &taskWorker.From.UseSSL,
-		false, &taskWorker.From.Region, true,
+	m.Client.MinioClient, m.Client.ClientCfg, e = utils.InitClient(
+		&m.TaskWorker.From.Endpoints[0], &m.TaskWorker.From.Port, &m.TaskWorker.From.Acesskey, &m.TaskWorker.From.Secretkey, &m.TaskWorker.From.UseSSL,
+		false, &m.TaskWorker.From.Region, true,
 	)
 	if e != nil {
-		globals.TaskStatus = "error"
 		return e
 	}
 
-	Client.MinioClient = client
-	Client.ClientCfg = connection
-	interactive := false // флаг что не интерактивный
-	serve := true
-	debug := true                   // флаг включения debug
-	threads := runtime.NumCPU() * 2 // кол-во потоков выполнения вдвое больше кол-ва CPU
-	logrus.Infof("Количество батчей/потоков = %d", threads)
+	m.TaskContext, m.TaskContextCancel = context.WithCancel(m.GlobalContext)
+	m.InteractiveFlag = false        // флаг что не интерактивный
+	m.ServerFlag = true              // флаг что запукчен серверный режим
+	m.DebugFlag = true               // флаг включения debug
+	m.Threads = runtime.NumCPU() * 2 // кол-во потоков выполнения вдвое больше кол-ва CPU
+	return nil
+}
 
-	// Выполнение операций перед началом миграции
-	// Если не удается выполнить операции pre миграции то это ошибка не позволяючая продолжать
+// Метод структуры для выполнения premigrate операций
+func (m *MigrateProps) PreMigrate() error {
+	// Ждем 30 секунд - задержка перед стартом на всякий случай
+	time.Sleep(30 * time.Second)
+
 	workeruuid, _, _, e := slaveutils.GenUuid() // UUID воркера
 	if e != nil {
 		return e
@@ -145,173 +117,26 @@ func migrateTask(task *api.GetTaskResponse, ctx context.Context, me string, conn
 		port = HTTP_PORT
 	}
 
-	e = preMigrate(ctx, &Client, topicoperation.TopicConfig{
-		TopicName:         fmt.Sprintf("%s-%s-%s", workeruuid, taskWorker.FromBucket, strconv.Itoa(int(globals.CurrentTaskId.Load()))), // Имя топика (сотосит из workeruuid-srcbucketname-taskid)
-		PushEndpoint:      "http://" + host + ":" + port,                                                                               // Endpoint подключения к данному воркеру
-		UseSsl:            false,                                                                                                       // Наш воркер работает на HTTP без SSl
-		VerifySsl:         false,                                                                                                       // Мы говорим что даже ели вдруг при подключении окажется что там ssl то не проверять
-		HttpAuthUser:      "",                                                                                                          // В нашем воркере нет аутентификации (пока что)
-		HttpAuthPassword:  "",                                                                                                          // В нашем воркере нет аутентификации (пока что)
-		CloudeventsFormat: true,                                                                                                        // Нам интересен данный формат
-	}, taskWorker.FromBucket, taskWorker.Prefix)
-	if e != nil {
-		return e
+	topic := topicoperation.TopicConfig{
+		TopicName:         fmt.Sprintf("%s-%s-%s", workeruuid, m.TaskWorker.FromBucket, strconv.Itoa(int(globals.CurrentTaskId.Load()))), // Имя топика (сотосит из workeruuid-srcbucketname-taskid)
+		PushEndpoint:      "http://" + host + ":" + port,                                                                                 // Endpoint подключения к данному воркеру
+		UseSsl:            false,                                                                                                         // Наш воркер работает на HTTP без SSl
+		VerifySsl:         false,                                                                                                         // Мы говорим что даже ели вдруг при подключении окажется что там ssl то не проверять
+		HttpAuthUser:      "",                                                                                                            // В нашем воркере нет аутентификации (пока что)
+		HttpAuthPassword:  "",                                                                                                            // В нашем воркере нет аутентификации (пока что)
+		CloudeventsFormat: true,
 	}
-
-	// Запуск процесса миграции выполняется фоново от основного процесса
-	// с блокировкой окончания
-	var wg sync.WaitGroup // Группа ожидания завершения горутин
-	// Поток выполнения миграции
-	wg.Add(1)
-	go func(wg *sync.WaitGroup, taskcancel context.CancelFunc) {
-		defer taskcancel() // отменяем контекст по завершению что бы завершилась горутина отслеживания сигнала отмены
-		defer wg.Done()
-		// Создание внешнего канала получения статистики
-		// выполнения миграции
-		// запуск потока чтения данных из канала report
-		// и передачи данных на мастера
-		wg.Add(1)
-		go func(wg *sync.WaitGroup) {
-			defer wg.Done()
-			tick := time.Tick(2 * time.Second)
-			for {
-				select {
-				case <-taskctx.Done():
-					return
-				case <-ctx.Done():
-					return
-				case <-tick:
-					// Тут реализация отправки статистики мастеру
-					keycount, _ := MDB.GetDBKeyCount()
-					reporter.Difference.Store(uint64(keycount))
-					e = UpdateMigrateStatus(me, ctx, conn, &api.MigrateReport{
-						TotalObjects: reporter.TotalObjects.Load(),
-						ErrorObjects: reporter.ErrorObjects.Load(),
-						DoneObjects:  reporter.DoneObjects.Load(),
-						Difference:   reporter.Difference.Load(),
-					})
-					if e != nil {
-						logrus.Errorf("Ошибка передачи отчета миграции: %s", e.Error())
-					} else {
-						logrus.Info("Отправка отчета выполнения миграции - успешно")
-					}
-				}
-			}
-		}(wg)
-
-		// Запуск операции миграции
-		e := objectoperations.MigrateObjects(&Client, taskWorker.FromBucket, taskWorker.Prefix, taskWorker.To.Name,
-			&taskWorker.To.UseSSL, threads, taskWorker.ToBucket, interactive, debug, taskctx, taskcancel, nil, &taskWorker.To.Region, serve, &reporter,
-		)
-		if e != nil {
-			globals.TaskStatus = "error"
-		} else {
-			globals.TaskStatus = "done"
-		}
-		reporter.PrintStats()
-		return
-	}(&wg, taskcancel)
-
-	// Поток отслеживания состояния задачи - сигнала отмены выполнения
-	// поток отслеживания завершается если основная задача миграции закончилась или если пришол сигнал отмены задачи
-	wg.Add(1)
-	go func(wg *sync.WaitGroup, taskcancel context.CancelFunc) {
-		defer wg.Done()
-		for {
-			select {
-			case <-taskctx.Done():
-				return
-			default:
-				// Тут запрос состояния отмены задачи
-				time.Sleep(10 * time.Second)
-				// отмена контекста выполнения горутины миграции по полученному состоянию
-				// taskcancel()
-				// return
-			}
-		}
-	}(&wg, taskcancel)
-	wg.Wait()
-
-	keycount, _ = MDB.GetDBKeyCount()
-	reporter.Difference.Store(uint64(keycount))
-	e = UpdateMigrateStatus(me, ctx, conn, &api.MigrateReport{
-		TotalObjects: reporter.TotalObjects.Load(),
-		ErrorObjects: reporter.ErrorObjects.Load(),
-		DoneObjects:  reporter.DoneObjects.Load(),
-		Difference:   reporter.Difference.Load(),
-	})
-	if e != nil {
-		logrus.Error("Ошибка выполнения запроса на обновление статуса задачи: ", e.Error())
-	}
-
-	// Выполнение операции постмиграции - применения изменений
-	// произошедших в бакете за время миграции бакета
-	e = postMigrate(ctx, &Client, taskWorker)
-	if e != nil {
-		logrus.Warnf("Не удалось выполнить операции постмиграции - топик и нотифкация сохранены Ошибка: %s", e.Error())
-	} else {
-		logrus.Info("Выполненна очистка конфигурации топика и нотификации бакета источника")
-	}
-
-	return nil
-}
-
-// Метод создания конфигурационного файла на воркере
-// необходимого для инициализации подключения к кластеру назначения
-func writeConfigFile(taskWorker models.WorkerMigrateTask) error {
-	config := global.Cfg{}
-	connectionto := global.Connection{
-		Name:                  taskWorker.To.Name,
-		Endpoints:             taskWorker.To.Endpoints,
-		Port:                  taskWorker.To.Port,
-		Region:                taskWorker.To.Region,
-		UseSSL:                taskWorker.To.UseSSL,
-		MultipartChecksSum:    taskWorker.To.MultipartChecksSum,
-		DisableMultipart:      taskWorker.To.DisableMultipart,
-		SendMd5CheckSum:       taskWorker.To.SendMd5CheckSum,
-		ConcurrentStreamParts: taskWorker.To.ConcurrentStreamParts,
-		Acesskey:              taskWorker.To.Acesskey,
-		Secretkey:             taskWorker.To.Secretkey,
-	}
-	connectionfrom := global.Connection{
-		Name:                  taskWorker.From.Name,
-		Endpoints:             taskWorker.From.Endpoints,
-		Port:                  taskWorker.From.Port,
-		Region:                taskWorker.From.Region,
-		UseSSL:                taskWorker.From.UseSSL,
-		MultipartChecksSum:    taskWorker.From.MultipartChecksSum,
-		DisableMultipart:      taskWorker.From.DisableMultipart,
-		SendMd5CheckSum:       taskWorker.From.SendMd5CheckSum,
-		ConcurrentStreamParts: taskWorker.From.ConcurrentStreamParts,
-		Acesskey:              taskWorker.From.Acesskey,
-		Secretkey:             taskWorker.From.Secretkey,
-	}
-	config.Connections = append(config.Connections, connectionto)
-	config.Connections = append(config.Connections, connectionfrom)
-	b, e := yaml.Marshal(config)
-	if e != nil {
-		return e
-	}
-	e = os.WriteFile("config.yaml", b, 0777)
-	if e != nil {
-		return e
-	}
-	return nil
-}
-
-// Метод выполнения операций установки правил нотификации передначалом миграции
-func preMigrate(ctx context.Context, client *global.GlobalClient, topic topicoperation.TopicConfig, frombn string, prefix string) error {
 	// Создаем новый топик к которому будем привязывать нотификацию
-	arn, e := topicoperation.CreateOrUpdateTopic(ctx, client.MinioClient, topic)
+	arn, e := topicoperation.CreateOrUpdateTopic(m.GlobalContext, m.Client.MinioClient, topic)
 	if e != nil {
 		return e
 	}
 
 	// Создаем объект инфорации о бакете
 	bi := bucketoperations.BucketInfo{
-		Name: &frombn,
+		Name: &m.TaskWorker.FromBucket,
 	}
-	e = bi.Make(client)
+	e = bi.Make(m.Client)
 	if e != nil {
 		return e
 	}
@@ -340,26 +165,24 @@ func preMigrate(ctx context.Context, client *global.GlobalClient, topic topicope
 			S3Key: notification.S3Key{
 				FilterRules: []notification.FilterRule{
 					{
-						Name:  "prefix", // Указываем, что фильтруем по префиксу
-						Value: prefix,   // Имя папки в бакете (обязательно со слэшем на конце)
+						Name:  "prefix",            // Указываем, что фильтруем по префиксу
+						Value: m.TaskWorker.Prefix, // Имя папки в бакете (обязательно со слэшем на конце)
 					},
 				},
 			},
 		},
 	})
 
-	return bi.ChangeNotificationConfig(client, bi.NotificationConfiguration)
+	return bi.ChangeNotificationConfig(m.Client, bi.NotificationConfiguration)
 }
 
-// Метод выполнения операции удаления топика и нотификации с бакета
-// Сначала удаляем конфигурацию нотификации
-// Затем удаляем топик
-func postMigrate(ctx context.Context, client *global.GlobalClient, taskWorker models.WorkerMigrateTask) error {
+// Метод структуры для выполнения postmigrate операций
+func (m *MigrateProps) PostMigrate() error {
 	// Создаем объект инфорации о бакете
 	bi := bucketoperations.BucketInfo{
-		Name: &taskWorker.FromBucket,
+		Name: &m.TaskWorker.FromBucket,
 	}
-	e := bi.Make(client)
+	e := bi.Make(m.Client)
 	if e != nil {
 		return e
 	}
@@ -368,13 +191,13 @@ func postMigrate(ctx context.Context, client *global.GlobalClient, taskWorker mo
 	if e != nil {
 		return e
 	}
-	topiclist, e := topicoperation.GetTopicsList(ctx, client.MinioClient)
+	topiclist, e := topicoperation.GetTopicsList(m.GlobalContext, m.Client.MinioClient)
 	if e != nil {
 		return e
 	}
 	// Проходим по массиву всех ARN сопоставляем и если найденно то удаляем
 	for _, arn := range topiclist {
-		if strings.Contains(arn, fmt.Sprintf("%s-%s-%s", workeruuid, taskWorker.FromBucket, strconv.Itoa(int(globals.CurrentTaskId.Load())))) {
+		if strings.Contains(arn, fmt.Sprintf("%s-%s-%s", workeruuid, m.TaskWorker.FromBucket, strconv.Itoa(int(globals.CurrentTaskId.Load())))) {
 			if len(strings.Split(arn, ":")) < 6 {
 				logrus.Warnf("Некорректный ARN топика: %s", arn)
 				continue
@@ -390,12 +213,12 @@ func postMigrate(ctx context.Context, client *global.GlobalClient, taskWorker mo
 				AccountID: "",
 				Resource:  resource, // Название нашего топика
 			})
-			e = bi.ChangeNotificationConfig(client, bi.NotificationConfiguration)
+			e = bi.ChangeNotificationConfig(m.Client, bi.NotificationConfiguration)
 			if e != nil {
 				logrus.Error("Ошибка удаления ")
 				return e
 			}
-			_, e := topicoperation.RemoveTopic(ctx, client.MinioClient, arn)
+			_, e := topicoperation.RemoveTopic(m.GlobalContext, m.Client.MinioClient, arn)
 			if e != nil {
 				return e
 			}
@@ -406,6 +229,175 @@ func postMigrate(ctx context.Context, client *global.GlobalClient, taskWorker mo
 	return nil
 }
 
-// Метод выполнения операции анализа изменений бакета источника
-// и применения этих изменений к бакету назначения
-func applyingSourceBucketChangesOnDstBucket() {}
+// Метод структуры отправки обновленного состояния мастеру
+func (m *MigrateProps) MasterEmit(status string) error {
+	if status != "" {
+		globals.TaskStatus = status
+	}
+
+	keycount, _ := MDB.GetDBKeyCount()
+	m.Reporter.Difference.Store(uint64(keycount))
+	return UpdateMigrateStatus(m.Me, m.GlobalContext, m.GrpcClientConn, &api.MigrateReport{
+		TotalObjects: m.Reporter.TotalObjects.Load(),
+		ErrorObjects: m.Reporter.ErrorObjects.Load(),
+		DoneObjects:  m.Reporter.DoneObjects.Load(),
+		Difference:   m.Reporter.Difference.Load(),
+	})
+}
+
+// Метод структуры создания конфигурационного файла
+func (m *MigrateProps) CreateConfig() error {
+	config := global.Cfg{}
+	connectionto := global.Connection{
+		Name:                  m.TaskWorker.To.Name,
+		Endpoints:             m.TaskWorker.To.Endpoints,
+		Port:                  m.TaskWorker.To.Port,
+		Region:                m.TaskWorker.To.Region,
+		UseSSL:                m.TaskWorker.To.UseSSL,
+		MultipartChecksSum:    m.TaskWorker.To.MultipartChecksSum,
+		DisableMultipart:      m.TaskWorker.To.DisableMultipart,
+		SendMd5CheckSum:       m.TaskWorker.To.SendMd5CheckSum,
+		ConcurrentStreamParts: m.TaskWorker.To.ConcurrentStreamParts,
+		Acesskey:              m.TaskWorker.To.Acesskey,
+		Secretkey:             m.TaskWorker.To.Secretkey,
+	}
+	connectionfrom := global.Connection{
+		Name:                  m.TaskWorker.From.Name,
+		Endpoints:             m.TaskWorker.From.Endpoints,
+		Port:                  m.TaskWorker.From.Port,
+		Region:                m.TaskWorker.From.Region,
+		UseSSL:                m.TaskWorker.From.UseSSL,
+		MultipartChecksSum:    m.TaskWorker.From.MultipartChecksSum,
+		DisableMultipart:      m.TaskWorker.From.DisableMultipart,
+		SendMd5CheckSum:       m.TaskWorker.From.SendMd5CheckSum,
+		ConcurrentStreamParts: m.TaskWorker.From.ConcurrentStreamParts,
+		Acesskey:              m.TaskWorker.From.Acesskey,
+		Secretkey:             m.TaskWorker.From.Secretkey,
+	}
+	config.Connections = append(config.Connections, connectionto)
+	config.Connections = append(config.Connections, connectionfrom)
+	b, e := yaml.Marshal(config)
+	if e != nil {
+		return e
+	}
+	e = os.WriteFile("config.yaml", b, 0777)
+	if e != nil {
+		return e
+	}
+	return nil
+}
+
+// Метод выполнения задачи миграции бакета
+func migrateTask(properties *MigrateProps) error {
+	// После окончания выполнения процесса миграции
+	// выполняем финальную отправку состояния и выполняем сброс memdb для очистки памяти
+	defer func() {
+		// Сброс memDB выполняется в конце после методов доливки
+		e := MDB.DropDB()
+		if e != nil {
+			logrus.Errorf("Ошибка выполнения сброса memdb: %s", e.Error())
+		} else {
+			logrus.Info("Сброс memdb выполнен успешно")
+		}
+		e = properties.MasterEmit("")
+		if e != nil {
+			logrus.Errorf("Ошибка финализации отчета выполнения: %s", e.Error())
+		}
+		properties.TaskContextCancel()
+	}()
+
+	// Обновление статуса задачи методом UpdateMigrateStatus
+	e := properties.MasterEmit("in-progress")
+	if e != nil {
+		globals.TaskStatus = "error"
+		logrus.Error("Ошибка выполнения запроса на обновление статуса задачи: ", e.Error())
+		return errors.New("Ошибка выполнения запроса на обновление статуса задачи (задача не будет выполненна): " + e.Error())
+	}
+
+	logrus.Infof("Количество батчей/потоков = %d", properties.Threads)
+
+	e = properties.PreMigrate()
+	if e != nil {
+		return e
+	}
+
+	// Запуск процесса миграции выполняется фоново от основного процесса
+	// с блокировкой окончания
+	// Поток выполнения миграции
+	properties.WaitGoup.Add(1)
+	go func(wg *sync.WaitGroup, taskcancel context.CancelFunc) {
+		defer taskcancel() // отменяем контекст по завершению что бы завершилась горутина отслеживания сигнала отмены
+		defer wg.Done()
+		// Создание внешнего канала получения статистики
+		// выполнения миграции
+		// запуск потока чтения данных из канала report
+		// и передачи данных на мастера
+		wg.Add(1)
+		go func(wg *sync.WaitGroup) {
+			defer wg.Done()
+			tick := time.Tick(2 * time.Second)
+			for {
+				select {
+				case <-properties.TaskContext.Done():
+					return
+				case <-properties.GlobalContext.Done():
+					return
+				case <-tick:
+					// Тут реализация отправки статистики мастеру
+					e := properties.MasterEmit("")
+					if e != nil {
+						logrus.Errorf("Ошибка передачи отчета миграции: %s", e.Error())
+					} else {
+						logrus.Info("Отправка отчета выполнения миграции - успешно")
+					}
+				}
+			}
+		}(wg)
+
+		// Запуск операции миграции
+		e := objectoperations.MigrateObjects(properties.Client, properties.TaskWorker.FromBucket, properties.TaskWorker.Prefix, properties.TaskWorker.To.Name,
+			&properties.TaskWorker.To.UseSSL, properties.Threads, properties.TaskWorker.ToBucket, properties.InteractiveFlag, properties.DebugFlag, properties.TaskContext, taskcancel, nil, &properties.TaskWorker.To.Region, properties.ServerFlag, properties.Reporter,
+		)
+		if e != nil {
+			globals.TaskStatus = "error"
+		} else {
+			globals.TaskStatus = "done"
+		}
+		properties.Reporter.PrintStats()
+	}(properties.WaitGoup, properties.TaskContextCancel)
+
+	// Поток отслеживания состояния задачи - сигнала отмены выполнения
+	// поток отслеживания завершается если основная задача миграции закончилась или если пришол сигнал отмены задачи
+	properties.WaitGoup.Add(1)
+	go func(wg *sync.WaitGroup, taskcancel context.CancelFunc) {
+		defer wg.Done()
+		ticker := time.Tick(1 * time.Second)
+		for {
+			select {
+			case <-properties.TaskContext.Done():
+				return
+			case <-ticker:
+				// Тут запрос состояния отмены задачи
+				// отмена контекста выполнения горутины миграции по полученному состоянию
+				// taskcancel()
+				// return
+			}
+		}
+	}(properties.WaitGoup, properties.TaskContextCancel)
+	properties.WaitGoup.Wait()
+
+	// Выполнение операции постмиграции
+	e = properties.PostMigrate()
+	if e != nil {
+		logrus.Warnf("Не удалось выполнить операции постмиграции - топик и нотифкация сохранены Ошибка: %s", e.Error())
+	} else {
+		logrus.Info("Выполненна очистка конфигурации топика и нотификации бакета источника")
+	}
+
+	return nil
+}
+
+// Метод применения изменений накопленных за время миграции бакета
+func applyChanges(properties *MigrateProps) error {
+	return nil
+}

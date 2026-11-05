@@ -53,7 +53,7 @@ func ClientHello(masterendpoint string, ctx context.Context, conn *grpc.ClientCo
 			return errors.New("Ошибка responce is nil")
 		}
 
-		if response != nil && response.Status != "Allow" {
+		if response.Status != "Allow" {
 			logrus.Error("Ошибка подклюбчения к мастеру: ", response.Status, " Детально: ", response.StatusDetailed)
 			return errors.New("Ошибка подклюбчения к мастеру: " + response.Status + " Детально: " + response.StatusDetailed)
 		}
@@ -103,7 +103,7 @@ func GetTask(masterendpoint string, ctx context.Context, conn *grpc.ClientConn) 
 		if response.Id != 0 {
 			// Проверяем что это наша задача
 			if response.Uuid != uuid {
-				logrus.Warnf("Полученна не своя задача с ID: %s Мой UUID: %s UUID задачи: ", response.Id, uuid, response.Uuid)
+				logrus.Warnf("Полученна не своя задача с ID: %d Мой UUID: %s UUID задачи: ", response.Id, response.Uuid)
 				logrus.Warnf("Задача не будет исполнятся так как не предназначенна мне")
 				return nil, errors.New("Полученна чужая задача. Исполнение чужих задач не позволенно.")
 			}

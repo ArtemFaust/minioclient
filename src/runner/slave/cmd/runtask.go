@@ -5,19 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"minioclient/global"
+	objectoperations "minioclient/object_operations"
 	api "minioclient/runner/api"
 	models "minioclient/runner/db"
 	globals "minioclient/runner/slave/globals"
 	slaveutils "minioclient/runner/slave/utils"
 	runnerutils "minioclient/runner/utils"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
-
-// Глобальная переменная клиента
-var Client global.GlobalClient
 
 // метод инициализации запуска задачи
 // определяем тип задачи
@@ -46,11 +45,36 @@ func RunTask(task *api.GetTaskResponse, ctx context.Context, me string, conn *gr
 	}
 
 	// В зависимости от типа задачи инциируем запуск ее выполнения
-	switch {
-	case taskname == "Migrate bucket":
-		e := migrateTask(task, ctx, me, conn)
+	switch taskname {
+	case "Migrate bucket":
+		// Подготавливаем свойства задачи (ее параметры)
+		properties := MigrateProps{
+			Client:         &global.GlobalClient{},     // Инициализация внешней стурктуры ссылочного типа
+			RawTask:        &api.GetTaskResponse{},     // Инициализация внешней стурктуры ссылочного типа
+			Reporter:       &objectoperations.Report{}, // Инициализация внешней стурктуры ссылочного типа
+			GrpcClientConn: &grpc.ClientConn{},         // Инициализация внешней стурктуры ссылочного типа
+			WaitGoup:       &sync.WaitGroup{},          // Инициализация внешней стурктуры ссылочного типа
+		}
+		e := properties.Init(ctx, conn, me, task)
+		if e != nil {
+			globals.TaskStatus = "error"
+			return e
+		}
+		e = properties.CreateConfig()
+		if e != nil {
+			globals.TaskStatus = "error"
+			return e
+		}
+		// ВЫполнение миграции бакета
+		e = migrateTask(&properties)
 		if e != nil {
 			logrus.Error("Ошибка выполнения задачи миграция бакета: ", e.Error())
+			return e
+		}
+		// ВЫполнение доливки изменений
+		e = applyChanges(&properties)
+		if e != nil {
+			logrus.Error("Ошибка выполнения задачи миграции бакета: ", e.Error())
 			return e
 		}
 	default:
