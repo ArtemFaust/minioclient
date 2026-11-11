@@ -863,20 +863,21 @@ func showPolicy(client *global.GlobalClient, wm *winman.Manager, app *tview.Appl
 	}(), false)
 	//tpol.SetTextColor(tcell.ColorWhite)
 	//tpol.SetDynamicColors(true)
-	tpol.SetBorder(true)
+	tpol.SetBorder(false)
 	tpol.SetTitle("Policy")
 	//tpol.SetScrollable(true)
 	tpol.SetChangedFunc(func() {
 		// Валидация что текст является json
 		b := json.Valid([]byte(tpol.GetText()))
 		if !b {
-			tpol.SetBorderColor(tcell.ColorRed)
+			m.SetBorderColor(tcell.ColorRed)
 		} else {
-			tpol.SetBorderColor(tcell.ColorGreen)
+			m.SetBorderColor(tcell.ColorGreen)
 			policy = tpol.GetText() // Меняем реактивную переменную
 		}
 	})
 
+	m.SetRoot(tpol)
 	m.SetTitle("Политика бакета " + *bi.Name)
 	m.AddButton(&winman.Button{
 		Symbol:  '❌',

@@ -7,10 +7,11 @@ connections:
   usessl: false
   multipartChecksSum: ChecksumCRC64NVME
   disableMultipart: false
-  sendMd5CheckSum: false
-  concurrentStreamParts: false
+  sendMd5CheckSum: true
+  concurrentStreamParts: true
   acesskey: B97RJOA35GZ66OHIA6B8
   secretkey: uS1HdLhOnI1ncCgpzdiEDE2DIHt3fEouoZHS7OAW
+
 - name: ceph-single02
   endpoints:
   - 192.168.1.190
@@ -19,7 +20,7 @@ connections:
   usessl: false
   multipartChecksSum: ChecksumCRC64NVME
   disableMultipart: false
-  sendMd5CheckSum: false
-  concurrentStreamParts: false
+  sendMd5CheckSum: true
+  concurrentStreamParts: true
   acesskey: 75QSPWHOV8CK3MXEZKFR
   secretkey: KSLcUySOfD9VQUWpJYqxJLIgE3CYcqv88oLU5fWp
