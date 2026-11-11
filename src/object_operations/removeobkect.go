@@ -95,7 +95,7 @@ func RemoveBucketObjects(client *global.GlobalClient, BucketName *string, force 
 	return nil
 }
 
-// Метод инициализации удаления обхектов из бакета
+/* Метод инициализации удаления обхектов из бакета
 func c(objects *[]global.BucketObject, lock chan bool, wg *sync.WaitGroup,
 	client *global.GlobalClient, BucketName *string, force *bool, dryrun bool) {
 	for _, object := range *objects {
@@ -106,7 +106,7 @@ func c(objects *[]global.BucketObject, lock chan bool, wg *sync.WaitGroup,
 	<-lock    // Высвобождаем слот
 	wg.Done() // Уменьшаем счетчик группы потоков
 }
-
+*/
 // Метод удаления объектов по ссответствию тегу объекта
 func RemoveBucketObjectByTags(client *global.GlobalClient, BucketName *string, force *bool, tag string,
 	not bool, dryrun bool, fixleak bool, leakcount int, indexpool string, interactive bool) error {

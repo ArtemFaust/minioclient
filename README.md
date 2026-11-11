@@ -405,7 +405,8 @@ minioclient -e localdev -ro -bn mybucket -key old.txt -dryrun -f
 ```
 
 ### Запуск мастера из контейнера
-1. Подготовка конфигурационного файла dbconfig.yaml
+1. Подготовка конфигурационного файла
+`dbconfig.yaml`
 ```yaml
 db:
   dbtype: "sqlite"
@@ -419,6 +420,7 @@ db:
   allow_reregister_workers: true
 ```
 Лучше использовать Postgress
+`dbconfig.yaml`
 ```yaml
 db:
   dbtype: "postgress"
@@ -506,6 +508,124 @@ then
     exit 0
 fi
 ```
+### Пример docker-compose.yaml
+```yaml
+version: '3.8'
+
+services:
+  master:
+    image: minioclient:amd64
+    container_name: master
+    ports:
+      - "8080:8080"
+    environment:
+      - MASTER=true
+      - DEBUG=true
+      - MASTERPORT=8080
+    volumes:
+      - ./dbconfig.yaml:/home/minioclient/.config/dbconfig.yaml
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # ===== WORKERS =====
+
+  worker1:
+    image: minioclient:amd64
+    container_name: worker1
+    ports:
+      - "8081:8081"
+    environment: &worker_env
+      - SLAVE=true
+      - DEBUG=true
+      - MASTERENDPOINT=192.168.1.215:8080
+      - HOST_RUNNER=192.168.1.215
+      - HTTP_PORT=8081
+    deploy: &worker_deploy
+      resources:
+        limits:
+          cpus: '4'
+          memory: 512M
+        reservations:
+          cpus: '1'
+          memory: 256M
+
+  worker2:
+    image: minioclient:amd64
+    container_name: worker2
+    ports:
+      - "8082:8082"
+    environment:
+      <<: *worker_env
+      - HTTP_PORT=8082
+    deploy: *worker_deploy
+
+  worker3:
+    image: minioclient:amd64
+    container_name: worker3
+    ports:
+      - "8083:8083"
+    environment:
+      <<: *worker_env
+      - HTTP_PORT=8083
+    deploy: *worker_deploy
+
+  worker4:
+    image: minioclient:amd64
+    container_name: worker4
+    ports:
+      - "8084:8084"
+    environment:
+      <<: *worker_env
+      - HTTP_PORT=8084
+    deploy: *worker_deploy
+
+  worker5:
+    image: minioclient:amd64
+    container_name: worker5
+    ports:
+      - "8085:8085"
+    environment:
+      <<: *worker_env
+      - HTTP_PORT=8085
+    deploy: *worker_deploy
+
+  worker6:
+    image: minioclient:amd64
+    container_name: worker6
+    ports:
+      - "8086:8086"
+    environment:
+      <<: *worker_env
+      - HTTP_PORT=8086
+    deploy: *worker_deploy
+
+  worker7:
+    image: minioclient:amd64
+    container_name: worker7
+    ports:
+      - "8087:8087"
+    environment:
+      <<: *worker_env
+      - HTTP_PORT=8087
+    deploy: *worker_deploy
+
+  worker8:
+    image: minioclient:amd64
+    container_name: worker8
+    ports:
+      - "8088:8088"
+    environment:
+      <<: *worker_env
+      - HTTP_PORT=8088
+    deploy: *worker_deploy
+```
+
 
 ## Лицензия
 

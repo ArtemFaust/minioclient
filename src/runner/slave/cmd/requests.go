@@ -54,11 +54,11 @@ func ClientHello(masterendpoint string, ctx context.Context, conn *grpc.ClientCo
 		}
 
 		if response.Status != "Allow" {
-			logrus.Error("Ошибка подклюбчения к мастеру: ", response.Status, " Детально: ", response.StatusDetailed)
+			logrus.Error("[ClientHello] Ошибка подклюбчения к мастеру: ", response.Status, " Детально: ", response.StatusDetailed)
 			return errors.New("Ошибка подклюбчения к мастеру: " + response.Status + " Детально: " + response.StatusDetailed)
 		}
 
-		logrus.Info("Успешное подключение к мастеру. Статус воркера передан мастеру")
+		logrus.Info("[ClientHello] Успешное подключение к мастеру. Статус воркера передан мастеру")
 
 		return nil
 	}
@@ -70,7 +70,7 @@ func GetTask(masterendpoint string, ctx context.Context, conn *grpc.ClientConn) 
 	case <-ctx.Done():
 		return nil, nil
 	default:
-		logrus.Info("Запрос доступных задач")
+		logrus.Info("[GetTask] Запрос доступных задач")
 		client := api.NewMasterClient(conn)
 
 		// Генерируем UUID
@@ -89,13 +89,13 @@ func GetTask(masterendpoint string, ctx context.Context, conn *grpc.ClientConn) 
 
 		// Ошибка со стороны мастера
 		if response.Error {
-			logrus.Error("Ошибка подклюбчения к мастеру. Детально: ", response.AdditionalMessage)
+			logrus.Error("[GetTask] Ошибка подклюбчения к мастеру. Детально: ", response.AdditionalMessage)
 			return nil, errors.New("Ошибка подклюбчения к мастеру. Детально: " + response.AdditionalMessage)
 		}
 
 		// Нет доступных задач
 		if response.Id == 0 {
-			logrus.Info("Отсутсвуют доступные задачи. Детально: " + response.AdditionalMessage)
+			logrus.Info("[GetTask] Отсутсвуют доступные задачи. Детально: " + response.AdditionalMessage)
 			return nil, nil
 		}
 
@@ -103,11 +103,11 @@ func GetTask(masterendpoint string, ctx context.Context, conn *grpc.ClientConn) 
 		if response.Id != 0 {
 			// Проверяем что это наша задача
 			if response.Uuid != uuid {
-				logrus.Warnf("Полученна не своя задача с ID: %d Мой UUID: %s UUID задачи: ", response.Id, response.Uuid)
-				logrus.Warnf("Задача не будет исполнятся так как не предназначенна мне")
+				logrus.Warnf("[GetTask] Полученна не своя задача с ID: %d Мой UUID: %s UUID задачи: ", response.Id, response.Uuid)
+				logrus.Warnf("[GetTask] Задача не будет исполнятся так как не предназначенна мне")
 				return nil, errors.New("Полученна чужая задача. Исполнение чужих задач не позволенно.")
 			}
-			logrus.Info("Полученна новая задача с ID: ", response.Id)
+			logrus.Info("[GetTask] Полученна новая задача с ID: ", response.Id)
 
 			return response, nil
 		}
@@ -146,11 +146,11 @@ func UpdateMigrateStatus(masterendpoint string, ctx context.Context, conn *grpc.
 
 		if !response.UpdateStatus {
 			globals.TaskStatus = "error"
-			logrus.Error("Ошибка обновления стутуса задачи: ", response.AdditionalMessage)
+			logrus.Error("[UpdateMigrateStatus] Ошибка обновления стутуса задачи: ", response.AdditionalMessage)
 			return errors.New("Ошибка обновления стутуса задачи: " + response.AdditionalMessage)
 		}
 
-		logrus.Info("Статус задачи обновлен: ", response.AdditionalMessage)
+		logrus.Info("[UpdateMigrateStatus] Статус задачи обновлен: ", response.AdditionalMessage)
 
 		return nil
 	}

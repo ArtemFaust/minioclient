@@ -68,17 +68,12 @@ func RunTask(task *api.GetTaskResponse, ctx context.Context, me string, conn *gr
 		// ВЫполнение миграции бакета
 		e = migrateTask(&properties)
 		if e != nil {
-			logrus.Error("Ошибка выполнения задачи миграция бакета: ", e.Error())
-			return e
-		}
-		// ВЫполнение доливки изменений
-		e = applyChanges(&properties)
-		if e != nil {
-			logrus.Error("Ошибка выполнения задачи миграции бакета: ", e.Error())
+			globals.TaskStatus = "error"
+			logrus.Error("[RunTask] Ошибка выполнения задачи миграция бакета: ", e.Error())
 			return e
 		}
 	default:
-		logrus.Warn("Не удалось определить тип задачи")
+		logrus.Warn("[RunTask] Не удалось определить тип задачи")
 		globals.TaskStatus = "error" // Ставим статус задачи
 		// Обновление статуса задачи методом UpdateMigrateStatus
 		return errors.New("Не удалось определить тип задачи")

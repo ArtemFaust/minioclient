@@ -205,9 +205,9 @@ func getObjectList(client *global.GlobalClient, bucketname string, prefix string
 				key := o.Key
 				list.AddItem(o.Key, "", '📁', func() {
 					makeObjectsListWindow(wm, client, bucketname, key, bucketname+"/"+key, app, footer, logger, interactive)
-				}).SetMainTextColor(tcell.ColorBlue).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
+				}).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
 			} else {
-				list.AddItem(o.Key, "", '📄', nil).SetMainTextColor(tcell.ColorYellow).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
+				list.AddItem(o.Key, "", '📄', nil).SetShortcutColor(tcell.NewRGBColor(0, 0, 0))
 			}
 		}
 		objectlist.SetBorderColor(tcell.Color101)

@@ -78,7 +78,7 @@ func getTask(masterendpoint string, ctx context.Context, conn *grpc.ClientConn, 
 			if conn != nil && conn.GetState().String() == "READY" {
 				task, e := cmd.GetTask(masterendpoint, ctx, conn)
 				if e != nil {
-					logrus.Error("Ошибка выполнения метода GetTask - ", e.Error())
+					logrus.Error("[getTask] Ошибка выполнения метода GetTask - ", e.Error())
 					continue
 				}
 
@@ -91,7 +91,7 @@ func getTask(masterendpoint string, ctx context.Context, conn *grpc.ClientConn, 
 				// Блокируючий метод - новые задачи не будут запрашиваться пока не завершится текучая
 				e = cmd.RunTask(task, ctx, masterendpoint, conn)
 				if e != nil {
-					logrus.Error("Ошибка выполнения метода RunTask - ", e.Error())
+					logrus.Error("[getTask] Ошибка выполнения метода RunTask - ", e.Error())
 					continue
 				}
 			}

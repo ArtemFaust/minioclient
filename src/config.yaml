@@ -1,25 +1,25 @@
-Connections:
-- Acesskey: 75QSPWHOV8CK3MXEZKFR
-  ConcurrentStreamParts: true
-  DisableMultipart: false
-  Endpoints:
-  - 192.168.1.190
-  MultipartChecksSum: ChecksumCRC64NVME
-  Name: ceph-single02
-  Port: "80"
-  Region: default
-  Secretkey: KSLcUySOfD9VQUWpJYqxJLIgE3CYcqv88oLU5fWp
-  SendMd5CheckSum: false
-  UseSSL: false
-- Acesskey: B97RJOA35GZ66OHIA6B8
-  ConcurrentStreamParts: true
-  DisableMultipart: false
-  Endpoints:
+connections:
+- name: ceph-single01
+  endpoints:
   - 192.168.1.187
-  MultipartChecksSum: ChecksumCRC64NVME
-  Name: ceph-single01
-  Port: "80"
-  Region: default
-  Secretkey: uS1HdLhOnI1ncCgpzdiEDE2DIHt3fEouoZHS7OAW
-  SendMd5CheckSum: false
-  UseSSL: false
+  port: "80"
+  region: default
+  usessl: false
+  multipartChecksSum: ChecksumCRC64NVME
+  disableMultipart: false
+  sendMd5CheckSum: false
+  concurrentStreamParts: false
+  acesskey: B97RJOA35GZ66OHIA6B8
+  secretkey: uS1HdLhOnI1ncCgpzdiEDE2DIHt3fEouoZHS7OAW
+- name: ceph-single02
+  endpoints:
+  - 192.168.1.190
+  port: "80"
+  region: default
+  usessl: false
+  multipartChecksSum: ChecksumCRC64NVME
+  disableMultipart: false
+  sendMd5CheckSum: false
+  concurrentStreamParts: false
+  acesskey: 75QSPWHOV8CK3MXEZKFR
+  secretkey: KSLcUySOfD9VQUWpJYqxJLIgE3CYcqv88oLU5fWp
